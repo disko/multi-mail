@@ -1721,7 +1721,25 @@ async def email_move_message(params: MoveEmailInput) -> str:
                     return f"Error copying message: {data}"
                 # Mark original for deletion
                 conn.uid("STORE", params.uid, "+FLAGS", "(\\Deleted)")
-                conn.expunge()
+                # Use UID EXPUNGE (RFC 4315 UIDPLUS) so we only remove this
+                # UID, not every \Deleted message in the folder. If the
+                # server doesn't advertise UIDPLUS, refuse rather than risk
+                # destroying the user's other \Deleted messages.
+                caps = b" ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else b""
+                if b"UIDPLUS" in caps:
+                    conn.uid("EXPUNGE", params.uid)
+                else:
+                    # Clear the \Deleted flag so a later untargeted
+                    # expunge from another client doesn't remove this
+                    # message either.
+                    conn.uid("STORE", params.uid, "-FLAGS", "(\\Deleted)")
+                    return (
+                        f"Error: server does not advertise UIDPLUS capability; "
+                        f"refusing to issue an untargeted EXPUNGE. Message UID "
+                        f"{params.uid} was copied to {params.dest_folder} but the "
+                        f"original in {params.source_folder} was left in place "
+                        f"(its \\Deleted flag has been cleared)."
+                    )
                 return f"Message UID {params.uid} moved from {params.source_folder} to {params.dest_folder}."
             finally:
                 try:
