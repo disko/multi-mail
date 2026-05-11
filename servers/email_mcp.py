@@ -8,6 +8,7 @@
 #     "managesieve",
 #     "caldav",
 #     "vobject",
+#     "defusedxml>=0.7.1",
 # ]
 # ///
 """
@@ -31,7 +32,7 @@ import re
 import smtplib
 import socket
 import ssl
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
