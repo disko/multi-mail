@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "multi_mail": {
+      "command": "uv",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/servers/email_mcp.py"],
+      "env": {
+        "EMAIL_ACCOUNTS_CONFIG": "~/.claude/multi-mail-accounts.json"
+      }
+    }
+  }
+}
