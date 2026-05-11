@@ -45,6 +45,8 @@ import vobject
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from _security import safe_async_client
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -628,7 +630,7 @@ async def _try_mozilla_autoconfig(domain: str) -> Optional[Dict[str, Any]]:
         f"https://{domain}/.well-known/autoconfig/mail/config-v1.1.xml",
     ]
 
-    async with httpx.AsyncClient(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True, verify=False) as client:
+    async with safe_async_client(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True) as client:
         for url in urls:
             try:
                 resp = await client.get(url)
@@ -729,7 +731,7 @@ async def _try_microsoft_autodiscover(domain: str, email_addr: str) -> Optional[
 
     headers = {"Content-Type": "text/xml; charset=utf-8"}
 
-    async with httpx.AsyncClient(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True, verify=False) as client:
+    async with safe_async_client(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True) as client:
         for url in urls:
             try:
                 resp = await client.post(url, content=body, headers=headers)
@@ -862,8 +864,8 @@ async def _try_wellknown_dav(domain: str) -> Optional[Dict[str, Any]]:
         (f"https://{domain}/.well-known/caldav", "caldav_url"),
         (f"https://{domain}/.well-known/carddav", "carddav_url"),
     ]
-    async with httpx.AsyncClient(
-        timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True, verify=False
+    async with safe_async_client(
+        timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True
     ) as client:
         for url, key in checks:
             try:
@@ -2310,7 +2312,7 @@ async def _carddav_propfind(acct: Dict[str, Any]) -> List[Dict[str, str]]:
   </d:prop>
 </d:propfind>"""
     ssl_verify = not acct.get("dav_allow_insecure", False)
-    async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth) as client:
+    async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth) as client:
         resp = await client.request("PROPFIND", url, content=body, headers={**headers, "Depth": "1"})
         resp.raise_for_status()
     books = []
@@ -2349,7 +2351,7 @@ async def _carddav_list_vcards(acct: Dict[str, Any], book_href: str) -> List[Tup
 
     _, headers, auth = _carddav_headers(acct)
     ssl_verify = not acct.get("dav_allow_insecure", False)
-    async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth) as client:
+    async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth) as client:
         resp = await client.request("REPORT", full_url, content=body, headers={**headers, "Depth": "1"})
         resp.raise_for_status()
 
@@ -2619,7 +2621,7 @@ async def card_create_contact(params: CardCreateContactInput) -> str:
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
-        async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
             resp = await client.put(
                 put_url,
                 content=vcard_data,
@@ -2709,7 +2711,7 @@ async def card_update_contact(params: CardUpdateContactInput) -> str:
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
-        async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
             resp = await client.put(
                 put_url,
                 content=vc.serialize(),
@@ -2769,7 +2771,7 @@ async def card_delete_contact(params: CardDeleteContactInput) -> str:
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
-        async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
             resp = await client.delete(del_url, headers={})
             if resp.status_code not in (200, 204):
                 return f"Error: Server returned {resp.status_code}: {resp.text[:200]}"
