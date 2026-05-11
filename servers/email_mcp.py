@@ -33,6 +33,7 @@ import smtplib
 import socket
 import ssl
 from defusedxml import ElementTree as ET
+from xml.etree.ElementTree import Element as _XmlElement  # type-only; parsing goes through defusedxml
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -653,13 +654,13 @@ def _parse_mozilla_autoconfig(xml_text: str) -> Optional[Dict[str, Any]]:
     def _strip_ns(tag: str) -> str:
         return re.sub(r"\{[^}]+\}", "", tag)
 
-    def _find(parent: ET.Element, tag: str) -> Optional[ET.Element]:
+    def _find(parent: _XmlElement, tag: str) -> Optional[_XmlElement]:
         for child in parent.iter():
             if _strip_ns(child.tag) == tag:
                 return child
         return None
 
-    def _findall(parent: ET.Element, tag: str) -> List[ET.Element]:
+    def _findall(parent: _XmlElement, tag: str) -> List[_XmlElement]:
         return [c for c in parent.iter() if _strip_ns(c.tag) == tag]
 
     result: Dict[str, Any] = {"source": "mozilla-autoconfig"}
@@ -756,10 +757,10 @@ def _parse_microsoft_autodiscover(xml_text: str) -> Optional[Dict[str, Any]]:
     def _strip_ns(tag: str) -> str:
         return re.sub(r"\{[^}]+\}", "", tag)
 
-    def _findall(parent: ET.Element, tag: str) -> List[ET.Element]:
+    def _findall(parent: _XmlElement, tag: str) -> List[_XmlElement]:
         return [c for c in parent.iter() if _strip_ns(c.tag) == tag]
 
-    def _find_text(parent: ET.Element, tag: str) -> Optional[str]:
+    def _find_text(parent: _XmlElement, tag: str) -> Optional[str]:
         for c in parent.iter():
             if _strip_ns(c.tag) == tag and c.text:
                 return c.text.strip()

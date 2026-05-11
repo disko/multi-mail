@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!DOCTYPE lolz [
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+]>
+<clientConfig version="1.1">
+  <emailProvider id="lol.com">
+    <displayName>&lol3;</displayName>
+  </emailProvider>
+</clientConfig>
