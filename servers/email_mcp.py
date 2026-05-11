@@ -8,6 +8,7 @@
 #     "managesieve",
 #     "caldav",
 #     "vobject",
+#     "defusedxml>=0.7.1",
 # ]
 # ///
 """
@@ -31,7 +32,8 @@ import re
 import smtplib
 import socket
 import ssl
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
+from xml.etree.ElementTree import Element as _XmlElement  # type-only; parsing goes through defusedxml
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -43,6 +45,8 @@ import managesieve as ms
 import vobject
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from _security import safe_async_client
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -627,7 +631,7 @@ async def _try_mozilla_autoconfig(domain: str) -> Optional[Dict[str, Any]]:
         f"https://{domain}/.well-known/autoconfig/mail/config-v1.1.xml",
     ]
 
-    async with httpx.AsyncClient(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True, verify=False) as client:
+    async with safe_async_client(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True) as client:
         for url in urls:
             try:
                 resp = await client.get(url)
@@ -650,13 +654,13 @@ def _parse_mozilla_autoconfig(xml_text: str) -> Optional[Dict[str, Any]]:
     def _strip_ns(tag: str) -> str:
         return re.sub(r"\{[^}]+\}", "", tag)
 
-    def _find(parent: ET.Element, tag: str) -> Optional[ET.Element]:
+    def _find(parent: _XmlElement, tag: str) -> Optional[_XmlElement]:
         for child in parent.iter():
             if _strip_ns(child.tag) == tag:
                 return child
         return None
 
-    def _findall(parent: ET.Element, tag: str) -> List[ET.Element]:
+    def _findall(parent: _XmlElement, tag: str) -> List[_XmlElement]:
         return [c for c in parent.iter() if _strip_ns(c.tag) == tag]
 
     result: Dict[str, Any] = {"source": "mozilla-autoconfig"}
@@ -728,7 +732,7 @@ async def _try_microsoft_autodiscover(domain: str, email_addr: str) -> Optional[
 
     headers = {"Content-Type": "text/xml; charset=utf-8"}
 
-    async with httpx.AsyncClient(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True, verify=False) as client:
+    async with safe_async_client(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True) as client:
         for url in urls:
             try:
                 resp = await client.post(url, content=body, headers=headers)
@@ -753,10 +757,10 @@ def _parse_microsoft_autodiscover(xml_text: str) -> Optional[Dict[str, Any]]:
     def _strip_ns(tag: str) -> str:
         return re.sub(r"\{[^}]+\}", "", tag)
 
-    def _findall(parent: ET.Element, tag: str) -> List[ET.Element]:
+    def _findall(parent: _XmlElement, tag: str) -> List[_XmlElement]:
         return [c for c in parent.iter() if _strip_ns(c.tag) == tag]
 
-    def _find_text(parent: ET.Element, tag: str) -> Optional[str]:
+    def _find_text(parent: _XmlElement, tag: str) -> Optional[str]:
         for c in parent.iter():
             if _strip_ns(c.tag) == tag and c.text:
                 return c.text.strip()
@@ -861,8 +865,8 @@ async def _try_wellknown_dav(domain: str) -> Optional[Dict[str, Any]]:
         (f"https://{domain}/.well-known/caldav", "caldav_url"),
         (f"https://{domain}/.well-known/carddav", "carddav_url"),
     ]
-    async with httpx.AsyncClient(
-        timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True, verify=False
+    async with safe_async_client(
+        timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True
     ) as client:
         for url, key in checks:
             try:
@@ -1138,36 +1142,38 @@ async def email_list_folders(params: ListFoldersInput) -> str:
     Returns:
         Markdown list of folder names.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            status, data = conn.list()
-            if status != "OK":
-                return f"Error: IMAP LIST failed: {status}"
-            folders = []
-            for item in data:
-                if isinstance(item, bytes):
-                    # Parse: (\\Flags) "delimiter" "name"
-                    parts = item.decode("utf-8", errors="replace")
-                    # Extract folder name after last quote pair
-                    try:
-                        name = parts.rsplit('"', 2)[-2]
-                    except IndexError:
-                        name = parts.split()[-1]
-                    folders.append(name)
-            folders.sort()
-            lines = [f"# Folders for {acct.get('display_name', params.account_id)}\n"]
-            for f in folders:
-                lines.append(f"- {f}")
-            return "\n".join(lines)
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                status, data = conn.list()
+                if status != "OK":
+                    return f"Error: IMAP LIST failed: {status}"
+                folders = []
+                for item in data:
+                    if isinstance(item, bytes):
+                        # Parse: (\\Flags) "delimiter" "name"
+                        parts = item.decode("utf-8", errors="replace")
+                        # Extract folder name after last quote pair
+                        try:
+                            name = parts.rsplit('"', 2)[-2]
+                        except IndexError:
+                            name = parts.split()[-1]
+                        folders.append(name)
+                folders.sort()
+                lines = [f"# Folders for {acct.get('display_name', params.account_id)}\n"]
+                for f in folders:
+                    lines.append(f"- {f}")
+                return "\n".join(lines)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1189,21 +1195,23 @@ async def email_create_folder(params: CreateFolderInput) -> str:
     Returns:
         Confirmation or error message.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            status, data = conn.create(params.folder)
-            if status != "OK":
-                return f"Error creating folder: {data}"
-            return f"Folder '{params.folder}' created on {params.account_id}."
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                status, data = conn.create(params.folder)
+                if status != "OK":
+                    return f"Error creating folder: {data}"
+                return f"Folder '{params.folder}' created on {params.account_id}."
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1225,21 +1233,23 @@ async def email_delete_folder(params: DeleteFolderInput) -> str:
     Returns:
         Confirmation or error message.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            status, data = conn.delete(params.folder)
-            if status != "OK":
-                return f"Error deleting folder: {data}"
-            return f"Folder '{params.folder}' deleted from {params.account_id}."
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                status, data = conn.delete(params.folder)
+                if status != "OK":
+                    return f"Error deleting folder: {data}"
+                return f"Folder '{params.folder}' deleted from {params.account_id}."
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 # ---------------------------------------------------------------------------
@@ -1268,54 +1278,56 @@ async def email_list_messages(params: ListEmailsInput) -> str:
     Returns:
         Markdown table of messages or an empty-folder notice.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            conn.select(params.folder, readonly=True)
-            status, data = conn.uid("SEARCH", None, "ALL")
-            if status != "OK":
-                return f"Error: SEARCH failed: {status}"
-            uids = data[0].split() if data[0] else []
-            if not uids:
-                return f"No messages in {params.folder}."
-
-            # Most recent first
-            uids = list(reversed(uids))
-            page = uids[params.offset : params.offset + params.limit]
-
-            results = []
-            for uid_bytes in page:
-                uid = uid_bytes.decode()
-                status2, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
-                if status2 != "OK" or not msg_data or not msg_data[0]:
-                    continue
-                raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
-                msg = email.message_from_bytes(raw)
-                results.append(_summarise_msg(msg, uid))
-
-            total = len(uids)
-            showing = len(results)
-            lines = [
-                f"# {params.folder} — {acct.get('display_name', params.account_id)}",
-                f"Showing {showing} of {total} messages (offset {params.offset})\n",
-                "| UID | From | Subject | Date |",
-                "|-----|------|---------|------|",
-            ]
-            for r in results:
-                lines.append(f"| {r['uid']} | {r['from'][:40]} | {r['subject'][:50]} | {r['date'][:25]} |")
-
-            if params.offset + params.limit < total:
-                lines.append(f"\n*More messages available — use offset={params.offset + params.limit}*")
-
-            return "\n".join(lines)
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                conn.select(params.folder, readonly=True)
+                status, data = conn.uid("SEARCH", None, "ALL")
+                if status != "OK":
+                    return f"Error: SEARCH failed: {status}"
+                uids = data[0].split() if data[0] else []
+                if not uids:
+                    return f"No messages in {params.folder}."
+
+                # Most recent first
+                uids = list(reversed(uids))
+                page = uids[params.offset : params.offset + params.limit]
+
+                results = []
+                for uid_bytes in page:
+                    uid = uid_bytes.decode()
+                    status2, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+                    if status2 != "OK" or not msg_data or not msg_data[0]:
+                        continue
+                    raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
+                    msg = email.message_from_bytes(raw)
+                    results.append(_summarise_msg(msg, uid))
+
+                total = len(uids)
+                showing = len(results)
+                lines = [
+                    f"# {params.folder} — {acct.get('display_name', params.account_id)}",
+                    f"Showing {showing} of {total} messages (offset {params.offset})\n",
+                    "| UID | From | Subject | Date |",
+                    "|-----|------|---------|------|",
+                ]
+                for r in results:
+                    lines.append(f"| {r['uid']} | {r['from'][:40]} | {r['subject'][:50]} | {r['date'][:25]} |")
+
+                if params.offset + params.limit < total:
+                    lines.append(f"\n*More messages available — use offset={params.offset + params.limit}*")
+
+                return "\n".join(lines)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1345,45 +1357,47 @@ async def email_search_messages(params: SearchEmailsInput) -> str:
     Returns:
         Markdown table of matching messages.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            conn.select(params.folder, readonly=True)
-            status, data = conn.uid("SEARCH", None, params.query)
-            if status != "OK":
-                return f"Error: SEARCH failed: {status}. Check your query syntax."
-            uids = data[0].split() if data[0] else []
-            if not uids:
-                return f"No messages matching: {params.query}"
-
-            uids = list(reversed(uids))[: params.limit]
-            results = []
-            for uid_bytes in uids:
-                uid = uid_bytes.decode()
-                status2, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
-                if status2 != "OK" or not msg_data or not msg_data[0]:
-                    continue
-                raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
-                msg = email.message_from_bytes(raw)
-                results.append(_summarise_msg(msg, uid))
-
-            lines = [
-                f"# Search Results — {acct.get('display_name', params.account_id)}",
-                f"Query: `{params.query}` in {params.folder} ({len(results)} results)\n",
-                "| UID | From | Subject | Date |",
-                "|-----|------|---------|------|",
-            ]
-            for r in results:
-                lines.append(f"| {r['uid']} | {r['from'][:40]} | {r['subject'][:50]} | {r['date'][:25]} |")
-            return "\n".join(lines)
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                conn.select(params.folder, readonly=True)
+                status, data = conn.uid("SEARCH", None, params.query)
+                if status != "OK":
+                    return f"Error: SEARCH failed: {status}. Check your query syntax."
+                uids = data[0].split() if data[0] else []
+                if not uids:
+                    return f"No messages matching: {params.query}"
+
+                uids = list(reversed(uids))[: params.limit]
+                results = []
+                for uid_bytes in uids:
+                    uid = uid_bytes.decode()
+                    status2, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+                    if status2 != "OK" or not msg_data or not msg_data[0]:
+                        continue
+                    raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
+                    msg = email.message_from_bytes(raw)
+                    results.append(_summarise_msg(msg, uid))
+
+                lines = [
+                    f"# Search Results — {acct.get('display_name', params.account_id)}",
+                    f"Query: `{params.query}` in {params.folder} ({len(results)} results)\n",
+                    "| UID | From | Subject | Date |",
+                    "|-----|------|---------|------|",
+                ]
+                for r in results:
+                    lines.append(f"| {r['uid']} | {r['from'][:40]} | {r['subject'][:50]} | {r['date'][:25]} |")
+                return "\n".join(lines)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1405,42 +1419,44 @@ async def email_read_message(params: ReadEmailInput) -> str:
     Returns:
         Full message headers and plain-text body.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            conn.select(params.folder, readonly=not params.mark_read)
-            fetch_cmd = "(RFC822)" if params.mark_read else "(BODY.PEEK[])"
-            status, data = conn.uid("FETCH", params.uid, fetch_cmd)
-            if status != "OK" or not data or not data[0]:
-                return f"Error: Could not fetch message UID {params.uid}."
-            raw = data[0][1] if isinstance(data[0], tuple) else data[0]
-            msg = email.message_from_bytes(raw)
-            body = _get_body(msg)
-
-            lines = [
-                f"# Message UID {params.uid}",
-                f"**From**: {_decode_header(msg.get('From'))}",
-                f"**To**: {_decode_header(msg.get('To'))}",
-            ]
-            if msg.get("Cc"):
-                lines.append(f"**CC**: {_decode_header(msg.get('Cc'))}")
-            lines.append(f"**Subject**: {_decode_header(msg.get('Subject'))}")
-            lines.append(f"**Date**: {_decode_header(msg.get('Date'))}")
-            lines.append(f"**Message-ID**: {msg.get('Message-ID', 'N/A')}")
-            lines.append("")
-            lines.append("---")
-            lines.append("")
-            lines.append(body[:50000])  # cap very large bodies
-
-            return "\n".join(lines)
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                conn.select(params.folder, readonly=not params.mark_read)
+                fetch_cmd = "(RFC822)" if params.mark_read else "(BODY.PEEK[])"
+                status, data = conn.uid("FETCH", params.uid, fetch_cmd)
+                if status != "OK" or not data or not data[0]:
+                    return f"Error: Could not fetch message UID {params.uid}."
+                raw = data[0][1] if isinstance(data[0], tuple) else data[0]
+                msg = email.message_from_bytes(raw)
+                body = _get_body(msg)
+
+                lines = [
+                    f"# Message UID {params.uid}",
+                    f"**From**: {_decode_header(msg.get('From'))}",
+                    f"**To**: {_decode_header(msg.get('To'))}",
+                ]
+                if msg.get("Cc"):
+                    lines.append(f"**CC**: {_decode_header(msg.get('Cc'))}")
+                lines.append(f"**Subject**: {_decode_header(msg.get('Subject'))}")
+                lines.append(f"**Date**: {_decode_header(msg.get('Date'))}")
+                lines.append(f"**Message-ID**: {msg.get('Message-ID', 'N/A')}")
+                lines.append("")
+                lines.append("---")
+                lines.append("")
+                lines.append(body[:50000])  # cap very large bodies
+
+                return "\n".join(lines)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 # ---------------------------------------------------------------------------
@@ -1532,13 +1548,15 @@ async def email_send_message(params: SendEmailInput) -> str:
     Returns:
         Confirmation with recipient and subject.
     """
-    try:
-        acct = _get_account(params.account_id)
-        msg = _build_message(acct, params.to, params.subject, params.body, params.cc, params.bcc)
-        _send_message(acct, msg, params.bcc)
-        return f"Email sent from {acct['email_address']} to {params.to}: \"{params.subject}\""
-    except Exception as e:
-        return f"Error sending email: {e}"
+    def _impl():
+        try:
+            acct = _get_account(params.account_id)
+            msg = _build_message(acct, params.to, params.subject, params.body, params.cc, params.bcc)
+            _send_message(acct, msg, params.bcc)
+            return f"Email sent from {acct['email_address']} to {params.to}: \"{params.subject}\""
+        except Exception as e:
+            return f"Error sending email: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1563,47 +1581,49 @@ async def email_reply(params: ReplyEmailInput) -> str:
     Returns:
         Confirmation message.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            conn.select(params.folder, readonly=True)
-            status, data = conn.uid("FETCH", params.uid, "(BODY.PEEK[])")
-            if status != "OK" or not data or not data[0]:
-                return f"Error: Could not fetch message UID {params.uid}."
-            raw = data[0][1] if isinstance(data[0], tuple) else data[0]
-            original = email.message_from_bytes(raw)
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
+                conn.select(params.folder, readonly=True)
+                status, data = conn.uid("FETCH", params.uid, "(BODY.PEEK[])")
+                if status != "OK" or not data or not data[0]:
+                    return f"Error: Could not fetch message UID {params.uid}."
+                raw = data[0][1] if isinstance(data[0], tuple) else data[0]
+                original = email.message_from_bytes(raw)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
 
-        # Determine recipients
-        to = _decode_header(original.get("Reply-To") or original.get("From"))
-        cc = None
-        if params.reply_all:
-            orig_to = _decode_header(original.get("To") or "")
-            orig_cc = _decode_header(original.get("Cc") or "")
-            all_addrs = [a.strip() for a in (orig_to + "," + orig_cc).split(",") if a.strip()]
-            # Remove self
-            all_addrs = [a for a in all_addrs if acct["email_address"].lower() not in a.lower()]
-            cc = ", ".join(all_addrs) if all_addrs else None
+            # Determine recipients
+            to = _decode_header(original.get("Reply-To") or original.get("From"))
+            cc = None
+            if params.reply_all:
+                orig_to = _decode_header(original.get("To") or "")
+                orig_cc = _decode_header(original.get("Cc") or "")
+                all_addrs = [a.strip() for a in (orig_to + "," + orig_cc).split(",") if a.strip()]
+                # Remove self
+                all_addrs = [a for a in all_addrs if acct["email_address"].lower() not in a.lower()]
+                cc = ", ".join(all_addrs) if all_addrs else None
 
-        subject = _decode_header(original.get("Subject") or "")
-        if not subject.lower().startswith("re:"):
-            subject = f"Re: {subject}"
+            subject = _decode_header(original.get("Subject") or "")
+            if not subject.lower().startswith("re:"):
+                subject = f"Re: {subject}"
 
-        message_id = original.get("Message-ID", "")
-        references = original.get("References", "")
-        if message_id:
-            references = f"{references} {message_id}".strip()
+            message_id = original.get("Message-ID", "")
+            references = original.get("References", "")
+            if message_id:
+                references = f"{references} {message_id}".strip()
 
-        msg = _build_message(acct, to, subject, params.body, cc=cc, in_reply_to=message_id, references=references)
-        _send_message(acct, msg)
-        return f"Reply sent to {to}" + (f" (CC: {cc})" if cc else "")
-    except Exception as e:
-        return f"Error replying: {e}"
+            msg = _build_message(acct, to, subject, params.body, cc=cc, in_reply_to=message_id, references=references)
+            _send_message(acct, msg)
+            return f"Reply sent to {to}" + (f" (CC: {cc})" if cc else "")
+        except Exception as e:
+            return f"Error replying: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1628,42 +1648,44 @@ async def email_forward(params: ForwardEmailInput) -> str:
     Returns:
         Confirmation message.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            conn.select(params.folder, readonly=True)
-            status, data = conn.uid("FETCH", params.uid, "(BODY.PEEK[])")
-            if status != "OK" or not data or not data[0]:
-                return f"Error: Could not fetch message UID {params.uid}."
-            raw = data[0][1] if isinstance(data[0], tuple) else data[0]
-            original = email.message_from_bytes(raw)
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
+                conn.select(params.folder, readonly=True)
+                status, data = conn.uid("FETCH", params.uid, "(BODY.PEEK[])")
+                if status != "OK" or not data or not data[0]:
+                    return f"Error: Could not fetch message UID {params.uid}."
+                raw = data[0][1] if isinstance(data[0], tuple) else data[0]
+                original = email.message_from_bytes(raw)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
 
-        orig_body = _get_body(original)
-        fwd_body = ""
-        if params.body:
-            fwd_body += params.body + "\n\n"
-        fwd_body += "---------- Forwarded message ----------\n"
-        fwd_body += f"From: {_decode_header(original.get('From'))}\n"
-        fwd_body += f"Date: {_decode_header(original.get('Date'))}\n"
-        fwd_body += f"Subject: {_decode_header(original.get('Subject'))}\n"
-        fwd_body += f"To: {_decode_header(original.get('To'))}\n\n"
-        fwd_body += orig_body
+            orig_body = _get_body(original)
+            fwd_body = ""
+            if params.body:
+                fwd_body += params.body + "\n\n"
+            fwd_body += "---------- Forwarded message ----------\n"
+            fwd_body += f"From: {_decode_header(original.get('From'))}\n"
+            fwd_body += f"Date: {_decode_header(original.get('Date'))}\n"
+            fwd_body += f"Subject: {_decode_header(original.get('Subject'))}\n"
+            fwd_body += f"To: {_decode_header(original.get('To'))}\n\n"
+            fwd_body += orig_body
 
-        subject = _decode_header(original.get("Subject") or "")
-        if not subject.lower().startswith("fwd:"):
-            subject = f"Fwd: {subject}"
+            subject = _decode_header(original.get("Subject") or "")
+            if not subject.lower().startswith("fwd:"):
+                subject = f"Fwd: {subject}"
 
-        msg = _build_message(acct, params.to, subject, fwd_body)
-        _send_message(acct, msg)
-        return f"Forwarded to {params.to}: \"{subject}\""
-    except Exception as e:
-        return f"Error forwarding: {e}"
+            msg = _build_message(acct, params.to, subject, fwd_body)
+            _send_message(acct, msg)
+            return f"Forwarded to {params.to}: \"{subject}\""
+        except Exception as e:
+            return f"Error forwarding: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1687,26 +1709,46 @@ async def email_move_message(params: MoveEmailInput) -> str:
     Returns:
         Confirmation message.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _imap_connect(acct)
+    def _impl():
         try:
-            conn.select(params.source_folder)
-            # Copy to destination
-            status, data = conn.uid("COPY", params.uid, params.dest_folder)
-            if status != "OK":
-                return f"Error copying message: {data}"
-            # Mark original for deletion
-            conn.uid("STORE", params.uid, "+FLAGS", "(\\Deleted)")
-            conn.expunge()
-            return f"Message UID {params.uid} moved from {params.source_folder} to {params.dest_folder}."
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error moving message: {e}"
+                conn.select(params.source_folder)
+                # Copy to destination
+                status, data = conn.uid("COPY", params.uid, params.dest_folder)
+                if status != "OK":
+                    return f"Error copying message: {data}"
+                # Mark original for deletion
+                conn.uid("STORE", params.uid, "+FLAGS", "(\\Deleted)")
+                # Use UID EXPUNGE (RFC 4315 UIDPLUS) so we only remove this
+                # UID, not every \Deleted message in the folder. If the
+                # server doesn't advertise UIDPLUS, refuse rather than risk
+                # destroying the user's other \Deleted messages.
+                caps = b" ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else b""
+                if b"UIDPLUS" in caps:
+                    conn.uid("EXPUNGE", params.uid)
+                else:
+                    # Clear the \Deleted flag so a later untargeted
+                    # expunge from another client doesn't remove this
+                    # message either.
+                    conn.uid("STORE", params.uid, "-FLAGS", "(\\Deleted)")
+                    return (
+                        f"Error: server does not advertise UIDPLUS capability; "
+                        f"refusing to issue an untargeted EXPUNGE. Message UID "
+                        f"{params.uid} was copied to {params.dest_folder} but the "
+                        f"original in {params.source_folder} was left in place "
+                        f"(its \\Deleted flag has been cleared)."
+                    )
+                return f"Message UID {params.uid} moved from {params.source_folder} to {params.dest_folder}."
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error moving message: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 # ---------------------------------------------------------------------------
@@ -1735,28 +1777,30 @@ async def email_sieve_list(params: SieveListInput) -> str:
     Returns:
         Markdown list of scripts with active indicator.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _sieve_connect(acct)
+    def _impl():
         try:
-            result, scripts = conn.listscripts()
-            if result != "OK":
-                return f"Error listing scripts: {result}"
-            if not scripts:
-                return f"No Sieve scripts on {params.account_id}."
-
-            lines = [f"# Sieve Scripts — {acct.get('display_name', params.account_id)}\n"]
-            for name, active in scripts:
-                marker = " **(active)**" if active else ""
-                lines.append(f"- `{name}`{marker}")
-            return "\n".join(lines)
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _sieve_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                result, scripts = conn.listscripts()
+                if result != "OK":
+                    return f"Error listing scripts: {result}"
+                if not scripts:
+                    return f"No Sieve scripts on {params.account_id}."
+
+                lines = [f"# Sieve Scripts — {acct.get('display_name', params.account_id)}\n"]
+                for name, active in scripts:
+                    marker = " **(active)**" if active else ""
+                    lines.append(f"- `{name}`{marker}")
+                return "\n".join(lines)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1778,28 +1822,30 @@ async def email_sieve_get(params: SieveGetInput) -> str:
     Returns:
         The full Sieve script content.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _sieve_connect(acct)
+    def _impl():
         try:
-            result, script_data = conn.getscript(params.script_name)
-            if result != "OK":
-                return f"Error: Could not retrieve script '{params.script_name}': {result}"
-            lines = [
-                f"# Sieve Script: `{params.script_name}`",
-                "",
-                "```sieve",
-                script_data,
-                "```",
-            ]
-            return "\n".join(lines)
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _sieve_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                result, script_data = conn.getscript(params.script_name)
+                if result != "OK":
+                    return f"Error: Could not retrieve script '{params.script_name}': {result}"
+                lines = [
+                    f"# Sieve Script: `{params.script_name}`",
+                    "",
+                    "```sieve",
+                    script_data,
+                    "```",
+                ]
+                return "\n".join(lines)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1825,31 +1871,33 @@ async def email_sieve_put(params: SievePutInput) -> str:
     Returns:
         Confirmation or server-side validation error.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _sieve_connect(acct)
+    def _impl():
         try:
-            result = conn.putscript(params.script_name, params.script_content)
-            if result != "OK":
-                return f"Error uploading script: {result}. The server rejected the script — check syntax."
-
-            msg = f"Script '{params.script_name}' uploaded to {params.account_id}."
-
-            if params.activate:
-                act_result = conn.setactive(params.script_name)
-                if act_result != "OK":
-                    msg += f"\nWarning: upload succeeded but activation failed: {act_result}"
-                else:
-                    msg += " Script is now **active**."
-
-            return msg
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _sieve_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                result = conn.putscript(params.script_name, params.script_content)
+                if result != "OK":
+                    return f"Error uploading script: {result}. The server rejected the script — check syntax."
+
+                msg = f"Script '{params.script_name}' uploaded to {params.account_id}."
+
+                if params.activate:
+                    act_result = conn.setactive(params.script_name)
+                    if act_result != "OK":
+                        msg += f"\nWarning: upload succeeded but activation failed: {act_result}"
+                    else:
+                        msg += " Script is now **active**."
+
+                return msg
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1874,24 +1922,26 @@ async def email_sieve_activate(params: SieveActivateInput) -> str:
     Returns:
         Confirmation message.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _sieve_connect(acct)
+    def _impl():
         try:
-            result = conn.setactive(params.script_name)
-            if result != "OK":
-                return f"Error activating script: {result}"
-            if params.script_name:
-                return f"Script '{params.script_name}' is now the active filter on {params.account_id}."
-            else:
-                return f"All Sieve scripts deactivated on {params.account_id}."
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _sieve_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                result = conn.setactive(params.script_name)
+                if result != "OK":
+                    return f"Error activating script: {result}"
+                if params.script_name:
+                    return f"Script '{params.script_name}' is now the active filter on {params.account_id}."
+                else:
+                    return f"All Sieve scripts deactivated on {params.account_id}."
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1916,24 +1966,26 @@ async def email_sieve_delete(params: SieveDeleteInput) -> str:
     Returns:
         Confirmation or error message.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _sieve_connect(acct)
+    def _impl():
         try:
-            result = conn.deletescript(params.script_name)
-            if result != "OK":
-                return (
-                    f"Error deleting script '{params.script_name}': {result}. "
-                    "If it's the active script, deactivate it first with email_sieve_activate."
-                )
-            return f"Script '{params.script_name}' deleted from {params.account_id}."
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _sieve_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                result = conn.deletescript(params.script_name)
+                if result != "OK":
+                    return (
+                        f"Error deleting script '{params.script_name}': {result}. "
+                        "If it's the active script, deactivate it first with email_sieve_activate."
+                    )
+                return f"Script '{params.script_name}' deleted from {params.account_id}."
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 @mcp.tool(
@@ -1958,55 +2010,57 @@ async def email_sieve_rename(params: SieveRenameInput) -> str:
     Returns:
         Confirmation or error message.
     """
-    try:
-        acct = _get_account(params.account_id)
-        conn = _sieve_connect(acct)
+    def _impl():
         try:
-            # Check if the old script is active
-            list_result, scripts = conn.listscripts()
-            was_active = False
-            if list_result == "OK":
-                for name, active in scripts:
-                    if name == params.old_name and active:
-                        was_active = True
-                        break
-
-            # Get the old script content
-            get_result, content = conn.getscript(params.old_name)
-            if get_result != "OK":
-                return f"Error: Could not retrieve script '{params.old_name}': {get_result}"
-
-            # Upload with new name
-            put_result = conn.putscript(params.new_name, content)
-            if put_result != "OK":
-                return f"Error uploading script with new name: {put_result}"
-
-            # Activate the new script if old was active
-            if was_active:
-                conn.setactive(params.new_name)
-
-            # Delete the old script (deactivate first if it was active)
-            if was_active:
-                # Already deactivated by setting new one active
-                pass
-            del_result = conn.deletescript(params.old_name)
-            if del_result != "OK":
-                return (
-                    f"Script uploaded as '{params.new_name}' but could not "
-                    f"delete old '{params.old_name}': {del_result}"
-                )
-
-            msg = f"Script renamed from '{params.old_name}' to '{params.new_name}'."
-            if was_active:
-                msg += " The new script is active."
-            return msg
-        finally:
+            acct = _get_account(params.account_id)
+            conn = _sieve_connect(acct)
             try:
-                conn.logout()
-            except Exception:
-                pass
-    except Exception as e:
-        return f"Error: {e}"
+                # Check if the old script is active
+                list_result, scripts = conn.listscripts()
+                was_active = False
+                if list_result == "OK":
+                    for name, active in scripts:
+                        if name == params.old_name and active:
+                            was_active = True
+                            break
+
+                # Get the old script content
+                get_result, content = conn.getscript(params.old_name)
+                if get_result != "OK":
+                    return f"Error: Could not retrieve script '{params.old_name}': {get_result}"
+
+                # Upload with new name
+                put_result = conn.putscript(params.new_name, content)
+                if put_result != "OK":
+                    return f"Error uploading script with new name: {put_result}"
+
+                # Activate the new script if old was active
+                if was_active:
+                    conn.setactive(params.new_name)
+
+                # Delete the old script (deactivate first if it was active)
+                if was_active:
+                    # Already deactivated by setting new one active
+                    pass
+                del_result = conn.deletescript(params.old_name)
+                if del_result != "OK":
+                    return (
+                        f"Script uploaded as '{params.new_name}' but could not "
+                        f"delete old '{params.old_name}': {del_result}"
+                    )
+
+                msg = f"Script renamed from '{params.old_name}' to '{params.new_name}'."
+                if was_active:
+                    msg += " The new script is active."
+                return msg
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+    return await asyncio.to_thread(_impl)
 
 
 # ---------------------------------------------------------------------------
@@ -2309,7 +2363,7 @@ async def _carddav_propfind(acct: Dict[str, Any]) -> List[Dict[str, str]]:
   </d:prop>
 </d:propfind>"""
     ssl_verify = not acct.get("dav_allow_insecure", False)
-    async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth) as client:
+    async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth) as client:
         resp = await client.request("PROPFIND", url, content=body, headers={**headers, "Depth": "1"})
         resp.raise_for_status()
     books = []
@@ -2348,7 +2402,7 @@ async def _carddav_list_vcards(acct: Dict[str, Any], book_href: str) -> List[Tup
 
     _, headers, auth = _carddav_headers(acct)
     ssl_verify = not acct.get("dav_allow_insecure", False)
-    async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth) as client:
+    async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth) as client:
         resp = await client.request("REPORT", full_url, content=body, headers={**headers, "Depth": "1"})
         resp.raise_for_status()
 
@@ -2618,7 +2672,7 @@ async def card_create_contact(params: CardCreateContactInput) -> str:
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
-        async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
             resp = await client.put(
                 put_url,
                 content=vcard_data,
@@ -2708,7 +2762,7 @@ async def card_update_contact(params: CardUpdateContactInput) -> str:
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
-        async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
             resp = await client.put(
                 put_url,
                 content=vc.serialize(),
@@ -2768,7 +2822,7 @@ async def card_delete_contact(params: CardDeleteContactInput) -> str:
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
-        async with httpx.AsyncClient(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
             resp = await client.delete(del_url, headers={})
             if resp.status_code not in (200, 204):
                 return f"Error: Server returned {resp.status_code}: {resp.text[:200]}"

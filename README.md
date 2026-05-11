@@ -1,5 +1,7 @@
 # Multi-Mail Plugin
 
+[![tests](https://github.com/disko/multi-mail/actions/workflows/test.yml/badge.svg)](https://github.com/disko/multi-mail/actions/workflows/test.yml)
+
 Connect Claude to multiple self-hosted mail servers — IMAP, SMTP, Sieve filters, CalDAV calendars, and CardDAV contacts.
 
 ## Features
@@ -154,3 +156,26 @@ Just ask Claude things like:
 | `card_create_contact` | Create a new contact |
 | `card_update_contact` | Update an existing contact |
 | `card_delete_contact` | Delete a contact |
+
+## Security
+
+- Autodiscovery (Mozilla autoconfig, Microsoft Autodiscover, well-known DAV) and all CardDAV requests verify TLS certificates and pass every URL — including each redirect hop — through an SSRF guard that refuses connections to loopback, RFC1918, link-local, multicast, reserved, and known cloud-metadata addresses.
+- Set `MULTI_MAIL_ALLOW_PRIVATE_AUTODISCOVER=1` only on lab networks with a known autodiscovery endpoint.
+- XML responses from untrusted servers are parsed with `defusedxml`, refusing entity-expansion / billion-laughs payloads.
+- Account passwords are still stored in plaintext in `~/.claude/multi-mail-accounts.json`. Migration to OS keychain (`keyring`) is tracked for a future release; for now, make sure the file is mode `0600` and its parent directory `0700`.
+- Inbound HTML email bodies are still returned to the model verbatim — treat them as untrusted input. A forthcoming release will strip HTML and prefix with an "untrusted content" delimiter.
+
+## Changelog
+
+### 0.3.0 — security release
+
+- **Fixed (security):** Autodiscovery and CardDAV requests now verify TLS certificates by default. Previous releases hardcoded `verify=False`, letting on-path attackers forge XML to redirect IMAP/SMTP/DAV traffic to malicious hosts and harvest credentials.
+- **Fixed (security):** Added an SSRF guard that resolves every requested host (and each redirect hop) and refuses connections to loopback, RFC1918, link-local, multicast, reserved, and known cloud-metadata addresses.
+- **Fixed (security):** XML parsing of untrusted server responses uses `defusedxml`.
+- **Fixed (data loss):** `email_move_message` uses RFC 4315 UIDPLUS `UID EXPUNGE` instead of a bare `EXPUNGE`. The previous behaviour would remove every `\Deleted` message in the source folder. If the server doesn't advertise UIDPLUS, the move is refused after the copy.
+- **Fixed (perf):** Blocking IMAP / SMTP / ManageSieve work no longer freezes the FastMCP event loop — each affected tool body now runs in `asyncio.to_thread`.
+- **Added:** pytest suite for the SSRF guard, the redirect hook, and the autodiscover XML parsers (incl. a billion-laughs fixture).
+
+### 0.2.0
+
+Initial release.
