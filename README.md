@@ -225,7 +225,7 @@ open htmlcov/index.html
 | Module | Coverage | Status |
 |--------|----------|--------|
 | `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV host pinning |
-| `servers/email_mcp.py` | ~65% | Helpers, account IO, message assembly, vCard/iCal formatters, IMAP read + write flows (folder CRUD, move with UIDPLUS branch, reply, forward), CardDAV/CalDAV/Sieve tool flows, autodiscover orchestrator |
+| `servers/email_mcp.py` | ~71% | Helpers, account IO, message assembly, vCard/iCal formatters, IMAP read + write flows (folder CRUD, move with UIDPLUS branch, reply, forward), CardDAV/CalDAV/Sieve tool flows, autodiscover orchestrator + all four discovery sources |
 
 Coverage is being increased phase by phase (see roadmap below) starting with the modules that have the highest blast radius (security, autodiscovery, server interaction). Three real bugs and one security fix have been surfaced by this coverage work so far.
 
@@ -241,7 +241,7 @@ Coverage is being increased phase by phase (see roadmap below) starting with the
 7. ✅ Sieve tool flows (`tests/test_sieve_tool_flows.py`)
 8. ✅ Autodiscover orchestrator (`tests/test_autodiscover_orchestrator.py`)
 9. ✅ Remaining IMAP/account write paths — `email_add_account` (dedupe + disk persistence), `email_create_folder`/`delete_folder`, `email_move_message` (both UIDPLUS branches), `email_reply` (threading + reply-all addressee filtering), `email_forward` (`tests/test_imap_write_flows.py`)
-10. Discovery sources — `_try_mozilla_autoconfig`, `_try_microsoft_autodiscover`, `_try_dns_srv`, `_try_wellknown_dav` against canned HTTP/DNS responses
+10. ✅ Discovery sources — `_try_mozilla_autoconfig` (primary URL, well-known fallback, network-error swallow), `_try_microsoft_autodiscover` (subdomain primary, root-domain fallback), `_try_wellknown_dav` (PROPFIND 207, partial discovery), `_try_dns_srv` (SSL-over-STARTTLS preference, RFC 2782 target-`.` rejection) — fake httpx client + fake `dig` subprocess (`tests/test_discovery_sources.py`)
 </details>
 
 ### Build the Desktop bundle locally
