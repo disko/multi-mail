@@ -147,16 +147,27 @@ def _smtp_connect(acct: Dict[str, Any]) -> smtplib.SMTP:
     return conn
 
 
-def _sieve_connect(acct: Dict[str, Any]) -> ms.MANAGESIEVE:
-    """Return an authenticated ManageSieve connection for *acct*.
+def _resolve_sieve_params(acct: Dict[str, Any]) -> Tuple[str, int, str, bool]:
+    """Return (host, port, security, allow_insecure) for a ManageSieve connection.
 
-    Uses the sieve_host/sieve_port from the account config if present,
-    otherwise falls back to the IMAP host on the default ManageSieve port 4190.
+    Treats explicit ``None`` for ``sieve_host`` (the schema default) the same as
+    a missing key — falls back to the IMAP host. ``dict.get(key, default)`` does
+    NOT do that: it returns ``None`` when the key exists with a null value, so
+    ``socket.create_connection`` ends up dialing localhost and the user sees
+    a misleading ``Connection refused``.
     """
-    host = acct.get("sieve_host", acct["imap_host"])
-    port = acct.get("sieve_port", 4190)
-    security = acct.get("sieve_security", "starttls").lower()
-    allow_insecure = acct.get("sieve_allow_insecure", acct.get("imap_allow_insecure", False))
+    host = acct.get("sieve_host") or acct["imap_host"]
+    port = acct.get("sieve_port") or 4190
+    security = (acct.get("sieve_security") or "starttls").lower()
+    allow_insecure = acct.get("sieve_allow_insecure")
+    if allow_insecure is None:
+        allow_insecure = acct.get("imap_allow_insecure", False)
+    return host, port, security, allow_insecure
+
+
+def _sieve_connect(acct: Dict[str, Any]) -> ms.MANAGESIEVE:
+    """Return an authenticated ManageSieve connection for *acct*."""
+    host, port, security, allow_insecure = _resolve_sieve_params(acct)
 
     use_tls = security == "starttls"
     conn = ms.MANAGESIEVE(

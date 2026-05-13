@@ -180,6 +180,12 @@ Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.ym
 
 ## Changelog
 
+### 0.3.2 — Sieve fix
+
+- **Fixed:** ManageSieve connections failed with `[Errno 61] Connection refused` for every account. `_sieve_connect` used `acct.get("sieve_host", acct["imap_host"])`, which returns `None` (not the IMAP host) when the saved JSON has `"sieve_host": null` — the schema's default. `socket.create_connection((None, 4190))` then dialed localhost. Now falls back via truthy-OR. Same fix applied to `sieve_port`, `sieve_security`, and `sieve_allow_insecure`.
+- **Added:** Regression tests for Sieve parameter resolution (`tests/test_sieve_config.py`).
+- **Added:** `LICENSE` (MIT) and `SECURITY.md`.
+
 ### 0.3.1 — packaging
 
 - **Added:** Claude Desktop `.mcpb` bundle (`manifest.json`, `scripts/pack-mcpb.sh`).
