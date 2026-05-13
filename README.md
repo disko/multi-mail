@@ -166,6 +166,33 @@ Just ask Claude things like:
 - Account passwords are still stored in plaintext in `~/.claude/multi-mail-accounts.json`. Migration to OS keychain (`keyring`) is tracked for a future release; for now, make sure the file is mode `0600` and its parent directory `0700`.
 - Inbound HTML email bodies are still returned to the model verbatim — treat them as untrusted input. A forthcoming release will strip HTML and prefix with an "untrusted content" delimiter.
 
+## Test Coverage
+
+The badge at the top of this README reflects the latest coverage run from
+[Codecov](https://app.codecov.io/gh/disko/multi-mail). Coverage is intentionally
+being increased phase by phase, starting with the modules that have the highest
+blast radius (security, autodiscovery, server interaction).
+
+| Module | Coverage | Status |
+|--------|----------|--------|
+| `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV URL pinning — covered |
+| `servers/email_mcp.py` | 24% | Pure helpers covered; IMAP/SMTP/DAV protocol layer needs an integration harness |
+
+Coverage roadmap (each bullet is a follow-up PR):
+
+1. **Account management** — `_load_accounts`, `_save_accounts`, `_get_account` (file IO with tmp_path fixture).
+2. **Message formatting** — `_build_message`, `_send_message` payload assembly (no SMTP).
+3. **vCard / iCal formatting** — `_format_event`, `_format_contact` against canned fixtures.
+4. **IMAP search syntax** — string-builders for search queries (pure).
+5. **Tool integration** — mocked IMAP/SMTP/DAV via `aioresponses` / `pytest-imap-server` once the unit floor is solid.
+
+To run coverage locally:
+
+```bash
+uv run pytest tests/ --cov --cov-report=term --cov-report=html
+open htmlcov/index.html
+```
+
 ## Claude Desktop Bundle
 
 Claude Desktop installs personal plugins as `.mcpb` bundles, not from a marketplace. To produce one:
@@ -179,6 +206,13 @@ This reads `manifest.json`, packs the tree (minus `.mcpbignore` entries), and wr
 Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.yml`) and attach it to the GitHub release.
 
 ## Changelog
+
+### 0.3.4 — header decoding + helper coverage
+
+- **Fixed:** `_decode_header` produced doubled spaces in mixed encoded/plain headers (`"Hällo  World"`) because the segment join inserted a space on top of segment-internal whitespace. Now concatenates without inserting.
+- **Fixed:** `_decode_header` crashed with `LookupError` when an email header declared an unknown charset (common in spam). Now falls back to UTF-8 with replacement.
+- **Added:** Unit tests for `_decode_header`, `_get_body`, `_summarise_msg`, `_domain_from_email`, and `_map_socket_type` (`tests/test_helpers.py`). Coverage 23% → 27%.
+- **Added:** "Test Coverage" section in README with per-module breakdown and roadmap.
 
 ### 0.3.3 — CardDAV host pinning
 

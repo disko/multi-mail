@@ -270,17 +270,24 @@ def _format_contact(vcard_data: str) -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 
 def _decode_header(raw: Optional[str]) -> str:
-    """Decode an RFC-2047 encoded header value."""
+    """Decode an RFC-2047 encoded header value.
+
+    Falls back to UTF-8 for unknown charsets so a spammy header doesn't crash
+    the whole tool call.
+    """
     if not raw:
         return ""
     parts = email.header.decode_header(raw)
     decoded = []
     for data, charset in parts:
         if isinstance(data, bytes):
-            decoded.append(data.decode(charset or "utf-8", errors="replace"))
+            try:
+                decoded.append(data.decode(charset or "utf-8", errors="replace"))
+            except LookupError:
+                decoded.append(data.decode("utf-8", errors="replace"))
         else:
             decoded.append(data)
-    return " ".join(decoded)
+    return "".join(decoded)
 
 
 def _get_body(msg: email.message.Message) -> str:
