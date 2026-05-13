@@ -19,10 +19,14 @@ fi
 manifest_version="$(grep -E '"manifest_version"' manifest.json | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
 plugin_version="$(grep -E '^[[:space:]]*"version"' manifest.json | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
 plugin_marketplace_version="$(grep -E '"version"' .claude-plugin/plugin.json | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+pyproject_version="$(grep -E '^version[[:space:]]*=' pyproject.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
 
-if [[ "$plugin_version" != "$plugin_marketplace_version" ]]; then
-  echo "error: manifest.json version ($plugin_version) does not match .claude-plugin/plugin.json version ($plugin_marketplace_version)" >&2
-  echo "       bump both before packing so Desktop and Claude Code agree" >&2
+if [[ "$plugin_version" != "$plugin_marketplace_version" ]] \
+  || [[ "$plugin_version" != "$pyproject_version" ]]; then
+  echo "error: version mismatch — keep all three in sync before packing:" >&2
+  echo "         manifest.json:              $plugin_version" >&2
+  echo "         .claude-plugin/plugin.json: $plugin_marketplace_version" >&2
+  echo "         pyproject.toml:             $pyproject_version" >&2
   exit 1
 fi
 

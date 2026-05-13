@@ -33,8 +33,12 @@ jobs:
         run: |
           version="$(grep -E '^[[:space:]]*"version"' manifest.json | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
           plugin_version="$(grep -E '"version"' .claude-plugin/plugin.json | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
-          if [ "$version" != "$plugin_version" ]; then
-            echo "error: manifest.json version ($version) does not match .claude-plugin/plugin.json version ($plugin_version)" >&2
+          pyproject_version="$(grep -E '^version[[:space:]]*=' pyproject.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+          if [ "$version" != "$plugin_version" ] || [ "$version" != "$pyproject_version" ]; then
+            echo "error: version mismatch — keep all three in sync:" >&2
+            echo "         manifest.json:              $version" >&2
+            echo "         .claude-plugin/plugin.json: $plugin_version" >&2
+            echo "         pyproject.toml:             $pyproject_version" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
