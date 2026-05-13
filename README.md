@@ -269,6 +269,15 @@ For deeper contributor notes, see [CLAUDE.md](CLAUDE.md).
 
 ## Changelog
 
+### 0.3.8 — coverage roadmap complete
+
+No runtime changes. Roadmap steps 9 and 10 done — every MCP tool flow and every autodiscovery source now has regression coverage.
+
+- **IMAP/SMTP write paths** (`tests/test_imap_write_flows.py`, 11 tests) — `email_add_account` (dedupe + disk persistence), folder CRUD, both branches of `email_move_message` (UIDPLUS + UIDPLUS-absent refuse-and-rollback), `email_reply` (threading + reply-all addressee filtering + idempotent "Re:" prefix), `email_forward` (quoted-original assembly + idempotent "Fwd:" prefix).
+- **Discovery sources** (`tests/test_discovery_sources.py`, 14 tests) — Mozilla autoconfig (primary URL + well-known fallback + network-error swallow), Microsoft Autodiscover (subdomain primary + root-domain fallback), `.well-known` DAV (PROPFIND 207 + partial discovery), DNS SRV (SSL-over-STARTTLS preference + RFC 2782 target-`.` rejection) via fake httpx client + fake `dig` subprocess.
+
+Project coverage: **60% → 72%** (`email_mcp.py` from 65% to ~71%; `_security.py` steady at 96%). 184 tests across 11 files.
+
 ### 0.3.7 — tool flow coverage milestone
 
 No runtime changes — but a substantial test investment. Coverage of `email_mcp.py` went from **24% to 59%** (`_security.py` at 96%, project total 60%). 62 new tests across five files covering the IMAP, CardDAV, CalDAV, Sieve tool flows and the autodiscover orchestrator.
