@@ -165,6 +165,18 @@ Just ask Claude things like:
 - Account passwords are still stored in plaintext in `~/.claude/multi-mail-accounts.json`. Migration to OS keychain (`keyring`) is tracked for a future release; for now, make sure the file is mode `0600` and its parent directory `0700`.
 - Inbound HTML email bodies are still returned to the model verbatim — treat them as untrusted input. A forthcoming release will strip HTML and prefix with an "untrusted content" delimiter.
 
+## Claude Desktop Bundle
+
+Claude Desktop installs personal plugins as `.mcpb` bundles, not from a marketplace. To produce one:
+
+```bash
+bash scripts/pack-mcpb.sh
+```
+
+This reads `manifest.json`, packs the tree (minus `.mcpbignore` entries), and writes `.mcpb-cache/multi-mail-<version>.mcpb`. Drag the resulting file onto Claude Desktop → Customize → Personal plugins (or use the ⋮ menu on an existing entry to replace).
+
+Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.yml`) and attach it to the GitHub release.
+
 ## Changelog
 
 ### 0.3.0 — security release

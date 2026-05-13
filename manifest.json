@@ -1,0 +1,72 @@
+{
+  "manifest_version": "0.2",
+  "name": "multi-mail",
+  "display_name": "Multi mail",
+  "version": "0.3.0",
+  "description": "Connect to multiple self-hosted mail servers — IMAP, SMTP, Sieve filters, CalDAV calendars, and CardDAV contacts",
+  "long_description": "Multi-mail exposes 31 MCP tools for IMAP/SMTP email, ManageSieve filters, CalDAV calendars, and CardDAV contacts. Supports multiple accounts, autodiscovery, SSRF-guarded DAV requests, and TLS-verified network access. Account configuration is stored in ~/.claude/multi-mail-accounts.json.",
+  "author": {
+    "name": "disko",
+    "url": "https://github.com/disko"
+  },
+  "homepage": "https://github.com/disko/multi-mail",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/disko/multi-mail"
+  },
+  "license": "MIT",
+  "keywords": ["email", "imap", "smtp", "sieve", "caldav", "carddav", "calendar", "contacts", "mail"],
+  "server": {
+    "type": "binary",
+    "entry_point": "servers/email_mcp.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "${__dirname}/servers/email_mcp.py"],
+      "env": {
+        "EMAIL_ACCOUNTS_CONFIG": "${HOME}/.claude/multi-mail-accounts.json"
+      }
+    }
+  },
+  "tools": [
+    { "name": "email_autodiscover", "description": "Auto-detect IMAP/SMTP/CalDAV/CardDAV settings from an email address" },
+    { "name": "email_list_accounts", "description": "List all configured accounts" },
+    { "name": "email_add_account", "description": "Add a new account" },
+    { "name": "email_remove_account", "description": "Remove an account" },
+    { "name": "email_list_folders", "description": "List IMAP folders" },
+    { "name": "email_create_folder", "description": "Create a folder" },
+    { "name": "email_delete_folder", "description": "Delete a folder" },
+    { "name": "email_list_messages", "description": "List messages (paginated)" },
+    { "name": "email_search_messages", "description": "Search with IMAP SEARCH syntax" },
+    { "name": "email_read_message", "description": "Read full message content" },
+    { "name": "email_send_message", "description": "Send a new email" },
+    { "name": "email_reply", "description": "Reply or reply-all" },
+    { "name": "email_forward", "description": "Forward a message" },
+    { "name": "email_move_message", "description": "Move between folders" },
+    { "name": "email_sieve_list", "description": "List Sieve filter scripts" },
+    { "name": "email_sieve_get", "description": "Retrieve a script's content" },
+    { "name": "email_sieve_put", "description": "Upload (create/replace) a Sieve script" },
+    { "name": "email_sieve_activate", "description": "Set active filter or deactivate all" },
+    { "name": "email_sieve_delete", "description": "Delete a Sieve script" },
+    { "name": "email_sieve_rename", "description": "Rename a Sieve script" },
+    { "name": "cal_list_calendars", "description": "List all calendars" },
+    { "name": "cal_list_events", "description": "List events (optional date range)" },
+    { "name": "cal_get_event", "description": "Get full event details" },
+    { "name": "cal_create_event", "description": "Create a new event" },
+    { "name": "cal_update_event", "description": "Update an existing event" },
+    { "name": "cal_delete_event", "description": "Delete an event" },
+    { "name": "card_list_addressbooks", "description": "List all address books" },
+    { "name": "card_list_contacts", "description": "List contacts in an address book" },
+    { "name": "card_search_contacts", "description": "Search contacts by name or email" },
+    { "name": "card_get_contact", "description": "Get full contact details" },
+    { "name": "card_create_contact", "description": "Create a new contact" },
+    { "name": "card_update_contact", "description": "Update an existing contact" },
+    { "name": "card_delete_contact", "description": "Delete a contact" }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

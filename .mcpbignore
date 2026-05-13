@@ -1,0 +1,14 @@
+.git/
+.github/
+.venv/
+.pytest_cache/
+.mcpb-cache/
+__pycache__/
+*.pyc
+.DS_Store
+tests/
+*.mcpb
+accounts.json
+.env
+.claude-plugin/
+.mcp.json

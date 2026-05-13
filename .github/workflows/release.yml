@@ -1,0 +1,139 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - manifest.json
+      - .claude-plugin/plugin.json
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force a release at the current manifest.json version (overwrites existing tag/release)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      should_release: ${{ steps.compare.outputs.should_release }}
+      tag_exists: ${{ steps.compare.outputs.tag_exists }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          fetch-tags: true
+
+      - name: Read current manifest version
+        id: read
+        run: |
+          version="$(grep -E '^[[:space:]]*"version"' manifest.json | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+          plugin_version="$(grep -E '"version"' .claude-plugin/plugin.json | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+          if [ "$version" != "$plugin_version" ]; then
+            echo "error: manifest.json version ($version) does not match .claude-plugin/plugin.json version ($plugin_version)" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Detected version: $version"
+
+      - name: Decide whether to release
+        id: compare
+        env:
+          VERSION: ${{ steps.read.outputs.version }}
+          FORCE: ${{ github.event.inputs.force }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          tag="v$VERSION"
+          if git rev-parse "refs/tags/$tag" >/dev/null 2>&1; then
+            tag_exists=true
+          else
+            tag_exists=false
+          fi
+          echo "tag_exists=$tag_exists" >> "$GITHUB_OUTPUT"
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$tag_exists" = "true" ] && [ "$FORCE" != "true" ]; then
+              echo "tag $tag already exists and force=false — skipping" >&2
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_release=true" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          if [ "$tag_exists" = "true" ]; then
+            echo "tag $tag already exists — version unchanged or release already shipped"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git cat-file -e HEAD^:manifest.json 2>/dev/null; then
+            prev_version="$(git show HEAD^:manifest.json | grep -E '^[[:space:]]*"version"' | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+          else
+            prev_version=""
+          fi
+          echo "Previous version: ${prev_version:-<none>}"
+
+          if [ -z "$prev_version" ] || [ "$prev_version" != "$VERSION" ]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version unchanged ($VERSION) — skipping"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  bundle:
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Pack .mcpb bundle
+        run: bash scripts/pack-mcpb.sh
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-mail-mcpb
+          path: .mcpb-cache/*.mcpb
+          if-no-files-found: error
+
+      - name: Create or move tag
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          TAG_EXISTS: ${{ needs.detect.outputs.tag_exists }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          tag="v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$TAG_EXISTS" = "true" ] && [ "$FORCE" = "true" ]; then
+            git tag -d "$tag" || true
+            git push --delete origin "$tag" || true
+          fi
+          git tag "$tag"
+          git push origin "$tag"
+
+      - name: Create GitHub release
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          FORCE: ${{ github.event.inputs.force }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          if [ "$FORCE" = "true" ]; then
+            gh release delete "$tag" --yes --cleanup-tag=false 2>/dev/null || true
+          fi
+          gh release create "$tag" \
+            --title "$tag" \
+            --generate-notes \
+            .mcpb-cache/*.mcpb
