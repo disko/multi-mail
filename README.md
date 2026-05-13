@@ -2,46 +2,85 @@
 
 [![tests](https://github.com/disko/multi-mail/actions/workflows/test.yml/badge.svg)](https://github.com/disko/multi-mail/actions/workflows/test.yml)
 [![coverage](https://codecov.io/gh/disko/multi-mail/branch/main/graph/badge.svg)](https://codecov.io/gh/disko/multi-mail)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Connect Claude to multiple self-hosted mail servers — IMAP, SMTP, Sieve filters, CalDAV calendars, and CardDAV contacts.
+> Talk to your own mail, calendar, and contact servers from Claude. Self-hosted, multi-account, no SaaS in the middle.
 
-## Features
+Multi-Mail plugs Claude into the open mail-server stack you already run — IMAP/SMTP, ManageSieve filters, CalDAV calendars, and CardDAV contacts. Add an email address and the plugin auto-discovers the rest. Once configured, just talk to Claude:
 
-- **Autodiscovery**: automatically detect IMAP/SMTP/CalDAV/CardDAV settings from an email address via Mozilla autoconfig, Microsoft/Mailcow Autodiscover, DNS SRV records, and `.well-known` endpoints
-- **Multi-account**: dynamically add and remove mail accounts at runtime
-- **Full IMAP**: list folders, browse messages, search with IMAP SEARCH syntax, read full messages, move between folders, create/delete folders
-- **Full SMTP**: send new emails, reply (including reply-all), forward with notes
-- **Sieve filters**: manage server-side mail filtering rules via ManageSieve (RFC 5804) — list, create, edit, activate, delete scripts
-- **CalDAV calendars**: list calendars, browse/create/update/delete events
-- **CardDAV contacts**: list address books, browse/search/create/update/delete contacts
-- **Security**: supports SSL/TLS and STARTTLS per account, with optional self-signed cert bypass
-- **Sent folder**: outgoing messages are automatically saved to the Sent folder
+> "Check my work email and reply to anything from Alice about the invoice."
+> "Set up a vacation auto-reply for next week."
+> "What's on my calendar Thursday?"
 
-## Components
+## What you get
 
-| Component | Description |
-|-----------|-------------|
-| **MCP Server** (`servers/email_mcp.py`) | Python/FastMCP server exposing 31 tools (email, Sieve, CalDAV, CardDAV) |
-| **Skill** (`skills/email-workflows/`) | Workflow guidance, IMAP search syntax, and Sieve language reference |
-| **Commands** | `/email-add-account`, `/email-remove-account`, `/email-list-accounts` |
+| | |
+|---|---|
+| **31 MCP tools** | Email read/send/reply/forward/move, folder/Sieve management, calendar event CRUD, contact CRUD |
+| **Autodiscovery** | Mozilla autoconfig, Microsoft/Mailcow Autodiscover, DNS SRV, and `.well-known` DAV — add an account by typing its email address |
+| **Multi-account** | Add and remove accounts at runtime; switch contexts per request |
+| **Sieve filters** | Manage server-side filtering rules via ManageSieve (RFC 5804) |
+| **Security by default** | TLS verification, SSRF guard on every redirect hop, `defusedxml` parsing, DAV host pinning, `0600`/`0700` on the credentials file |
+| **No SaaS** | All traffic goes from your machine to your mail server. The plugin talks to your servers, not ours. |
 
-## Setup
+---
 
-### Requirements
+## Install
 
-The MCP server uses [uv](https://docs.astral.sh/uv/) with inline script dependencies (PEP 723), so there's no manual install step. Just make sure `uv` is available on your PATH:
+### Claude Desktop (recommended for most users)
 
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+1. Grab the latest `.mcpb` bundle from the [releases page](https://github.com/disko/multi-mail/releases/latest).
+2. In Claude Desktop, open **Customize → Personal plugins**, then drag the `.mcpb` onto the panel. To update later, use the ⋮ menu on the existing entry to replace.
+3. Restart Claude Desktop.
+4. Install [`uv`](https://docs.astral.sh/uv/) if you don't have it — the server uses PEP 723 inline deps via `uv run`:
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+5. Ask Claude: *"Add my email account — alice@example.com"*. Claude will run autodiscovery and walk you through it.
 
-Dependencies (`mcp`, `pydantic`, `httpx`, `managesieve`, `caldav`, `vobject`) are resolved and cached automatically by `uv run` on first launch.
+### Claude Code
 
-### Account Configuration
+1. Clone into Claude Code's plugin directory (or anywhere on disk; point Code at it via `/plugin`):
+   ```bash
+   git clone https://github.com/disko/multi-mail.git ~/.plugins/multi-mail
+   ```
+2. Install `uv` (same one-liner as above).
+3. Restart Claude Code. You'll see `/email-add-account`, `/email-remove-account`, and `/email-list-accounts` slash commands plus the 31 MCP tools.
 
-Accounts are stored in `~/.claude/multi-mail-accounts.json` (created automatically). You can manage accounts using the slash commands or by editing the file directly.
+Updating later: `git pull` then restart the client.
 
-Each account entry looks like:
+### Verify it's working
+
+Ask Claude:
+
+> "List my email accounts."
+
+You should see an empty list (or your accounts if you've already added some). If Claude tells you the tools aren't available, restart the client.
+
+---
+
+## Try it
+
+Once you've added at least one account:
+
+| You say | Claude does |
+|---|---|
+| *"Check my work email"* | Lists recent INBOX messages |
+| *"Search for emails from alice about the invoice"* | IMAP SEARCH `FROM "alice" SUBJECT "invoice"` |
+| *"Reply to that and say I'll be there"* | `email_reply` with threading headers |
+| *"Forward this to the team"* | `email_forward` with notes |
+| *"Create a folder called Archive/2026"* | `email_create_folder` |
+| *"Show me my Sieve filters"* / *"Set up a vacation auto-reply"* | `email_sieve_*` |
+| *"What's on my calendar this week?"* | `cal_list_events` with a date window |
+| *"Create a meeting tomorrow at 2pm"* | `cal_create_event` |
+| *"Find Bob's phone number in my contacts"* | `card_search_contacts` |
+| *"Add a new contact for Alice"* | `card_create_contact` |
+
+---
+
+## Configuration
+
+Accounts are stored at `~/.claude/multi-mail-accounts.json`. The plugin creates and chmods this file (`0600` on POSIX) — you can also edit it by hand. Each entry looks like:
 
 ```json
 {
@@ -53,63 +92,61 @@ Each account entry looks like:
   "imap_host": "mail.example.com",
   "imap_port": 993,
   "imap_security": "ssl",
-  "imap_allow_insecure": false,
   "smtp_host": "mail.example.com",
   "smtp_port": 587,
   "smtp_security": "starttls",
-  "smtp_allow_insecure": false,
   "sieve_host": null,
   "sieve_port": 4190,
   "sieve_security": "starttls",
-  "sieve_allow_insecure": false,
   "caldav_url": "https://mail.example.com/dav",
-  "carddav_url": "https://mail.example.com/dav",
-  "dav_allow_insecure": false
+  "carddav_url": "https://mail.example.com/dav"
 }
 ```
 
-Sieve fields are optional — `sieve_host` defaults to the IMAP host, port 4190 with STARTTLS.
-CalDAV/CardDAV URLs are optional — autodiscovery tries `.well-known` endpoints automatically.
+- **Sieve fields are optional** — `sieve_host` defaults to the IMAP host on port 4190 with STARTTLS.
+- **DAV URLs are optional** — autodiscovery tries `.well-known` endpoints.
+- **Use app-specific passwords** when your mail server supports them. Don't paste your primary password.
+- **Self-signed certs:** set `*_allow_insecure: true` only on trusted networks. Don't ship this to production.
 
-### Security Recommendations
-
-- Use **app-specific passwords** when your mail server supports them
-- Set `*_allow_insecure: true` only for self-signed certificates on trusted networks
-- The `accounts.json` file contains credentials — keep it private
-
-## Usage
-
-### Slash Commands
+### Slash commands (Claude Code)
 
 - `/email-add-account` — add a new account (runs autodiscovery automatically)
 - `/email-remove-account` — remove an account
 - `/email-list-accounts` — show all configured accounts
 
-### Natural Language
+---
 
-Just ask Claude things like:
+## Security
 
-- "Check my work email"
-- "Search for emails from alice about the invoice"
-- "Send an email to bob@example.com about the meeting tomorrow"
-- "Reply to that last message and say I'll be there"
-- "Forward this to the team"
-- "Create a folder called Archive/2026"
-- "Show me my Sieve filters"
-- "Create a filter to move GitHub notifications to a GitHub folder"
-- "Set up a vacation auto-reply for next week"
-- "What's on my calendar this week?"
-- "Create a meeting for tomorrow at 2pm"
-- "Find Bob's phone number in my contacts"
-- "Add a new contact for Alice"
+Multi-Mail handles credentials and reaches user-controlled servers, so the threat model is non-trivial.
 
-### Available MCP Tools
+### Already in place
 
-#### Email (14 tools)
+- **TLS verification** on every outbound connection (IMAP / SMTP / ManageSieve / CalDAV / CardDAV / autodiscovery). Disable per-account with `*_allow_insecure: true` only when you must.
+- **SSRF guard** resolves every hostname and every redirect hop before connecting — refuses loopback, RFC1918, link-local, multicast, reserved, and known cloud-metadata addresses. Override with `MULTI_MAIL_ALLOW_PRIVATE_AUTODISCOVER=1` only on lab networks.
+- **`defusedxml`** for every XML response from an untrusted server (autodiscovery + DAV) — billion-laughs and entity-expansion payloads are rejected.
+- **DAV host pinning** — `<href>` elements returned by a CardDAV server are resolved against your configured `carddav_url` and cross-host results are refused. A compromised server can't redirect your auth'd request to an attacker.
+- **Credential file mode** — `accounts.json` is created with `0o600` and its parent dir with `0o700` on POSIX. Verified by tests.
+- **UIDPLUS `UID EXPUNGE`** for moves — won't accidentally wipe other `\Deleted` messages in the source folder.
+
+### Known limitations
+
+- Account passwords are still **plaintext** in `~/.claude/multi-mail-accounts.json`. Migration to OS keychain (`keyring`) is on the roadmap.
+- Inbound HTML email bodies are returned to the model **verbatim** — treat them as untrusted input. HTML stripping + "untrusted content" delimiter is on the roadmap.
+- Windows: the chmod is a no-op. Rely on the user profile ACL.
+
+To report a vulnerability privately, see [SECURITY.md](SECURITY.md).
+
+---
+
+## MCP tool reference
+
+<details>
+<summary><b>Email (14 tools)</b></summary>
 
 | Tool | Description |
 |------|-------------|
-| `email_autodiscover` | Auto-detect IMAP/SMTP/CalDAV/CardDAV settings from an email address |
+| `email_autodiscover` | Auto-detect IMAP/SMTP/CalDAV/CardDAV from an email address |
 | `email_list_accounts` | List all configured accounts |
 | `email_add_account` | Add a new account |
 | `email_remove_account` | Remove an account |
@@ -123,8 +160,10 @@ Just ask Claude things like:
 | `email_reply` | Reply or reply-all |
 | `email_forward` | Forward a message |
 | `email_move_message` | Move between folders |
+</details>
 
-#### Sieve (6 tools)
+<details>
+<summary><b>Sieve filters (6 tools)</b></summary>
 
 | Tool | Description |
 |------|-------------|
@@ -134,8 +173,10 @@ Just ask Claude things like:
 | `email_sieve_activate` | Set active filter or deactivate all |
 | `email_sieve_delete` | Delete a Sieve script |
 | `email_sieve_rename` | Rename a Sieve script |
+</details>
 
-#### CalDAV (5 tools)
+<details>
+<summary><b>Calendar — CalDAV (6 tools)</b></summary>
 
 | Tool | Description |
 |------|-------------|
@@ -145,8 +186,10 @@ Just ask Claude things like:
 | `cal_create_event` | Create a new event |
 | `cal_update_event` | Update an existing event |
 | `cal_delete_event` | Delete an event |
+</details>
 
-#### CardDAV (6 tools)
+<details>
+<summary><b>Contacts — CardDAV (7 tools)</b></summary>
 
 | Tool | Description |
 |------|-------------|
@@ -157,114 +200,122 @@ Just ask Claude things like:
 | `card_create_contact` | Create a new contact |
 | `card_update_contact` | Update an existing contact |
 | `card_delete_contact` | Delete a contact |
+</details>
 
-## Security
+---
 
-- Autodiscovery (Mozilla autoconfig, Microsoft Autodiscover, well-known DAV) and all CardDAV requests verify TLS certificates and pass every URL — including each redirect hop — through an SSRF guard that refuses connections to loopback, RFC1918, link-local, multicast, reserved, and known cloud-metadata addresses.
-- Set `MULTI_MAIL_ALLOW_PRIVATE_AUTODISCOVER=1` only on lab networks with a known autodiscovery endpoint.
-- XML responses from untrusted servers are parsed with `defusedxml`, refusing entity-expansion / billion-laughs payloads.
-- Account passwords are still stored in plaintext in `~/.claude/multi-mail-accounts.json`. Migration to OS keychain (`keyring`) is tracked for a future release. The plugin now enforces `0600` on the file and `0700` on its parent directory on POSIX systems; if you edited the file before v0.3.5, double-check the modes manually.
-- Inbound HTML email bodies are still returned to the model verbatim — treat them as untrusted input. A forthcoming release will strip HTML and prefix with an "untrusted content" delimiter.
+## Development
 
-## Test Coverage
-
-The badge at the top of this README reflects the latest coverage run from
-[Codecov](https://app.codecov.io/gh/disko/multi-mail). Coverage is intentionally
-being increased phase by phase, starting with the modules that have the highest
-blast radius (security, autodiscovery, server interaction).
-
-| Module | Coverage | Status |
-|--------|----------|--------|
-| `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV URL pinning — covered |
-| `servers/email_mcp.py` | 59% | Pure helpers, account IO, message assembly, vCard/iCal formatters, IMAP read flows, CardDAV/CalDAV/Sieve tool flows, and autodiscover orchestrator covered; remaining IMAP write/move/folder/account-add/forward/reply paths and the four `_try_*` discovery sources still to do |
-
-Coverage roadmap:
-
-1. ✅ **Account management** — `_load_accounts`, `_save_accounts`, `_get_account` (`tests/test_account_io.py`).
-2. ✅ **Message formatting** — `_build_message`, `_send_message` recipient/Sent fan-out (`tests/test_message_building.py`).
-3. ✅ **vCard / iCal formatting** — `_format_event`, `_format_contact` against canned fixtures (`tests/test_dav_formatting.py`).
-4. ✅ **IMAP tool flows** — `email_list_folders`, `email_search_messages`, `email_read_message` against a `_FakeIMAP` (`tests/test_imap_tool_flows.py`). _(Originally scoped as "search syntax builders"; re-scoped because the plugin passes raw IMAP SEARCH through.)_
-5. ✅ **CardDAV tool flows** — `card_list_addressbooks`, `card_list_contacts`, `card_search_contacts`, `card_get_contact`, `card_create_contact`, `card_delete_contact` against monkeypatched DAV helpers + a fake httpx client (`tests/test_carddav_tool_flows.py`).
-6. ✅ **CalDAV tool flows** — `cal_list_calendars`, `cal_list_events`, `cal_get_event`, `cal_create_event`, `cal_update_event`, `cal_delete_event` via hand-rolled `_FakeClient` / `_FakeCalendar` / `_FakeEvent` (`tests/test_caldav_tool_flows.py`).
-7. ✅ **Sieve tool flows** — `email_sieve_list/get/put/activate/delete/rename` against a fake ManageSieve client (`tests/test_sieve_tool_flows.py`).
-8. ✅ **Autodiscover orchestrator** — `_autodiscover` priority/merge logic with all four `_try_*` sources monkeypatched (`tests/test_autodiscover_orchestrator.py`).
-9. **Remaining IMAP/account write paths** — `email_add_account`, `email_create_folder`/`delete_folder`, `email_move_message`, `email_reply`, `email_forward` against the existing `_FakeIMAP` + a fake SMTP.
-10. **Discovery sources** — the four `_try_*` functions (`_try_mozilla_autoconfig`, `_try_microsoft_autodiscover`, `_try_dns_srv`, `_try_wellknown_dav`) against canned HTTP/DNS responses.
-
-To run coverage locally:
+### Run the test suite
 
 ```bash
-uv run pytest tests/ --cov --cov-report=term --cov-report=html
+uv sync --group dev
+uv run pytest tests/ --cov --cov-report=term
+```
+
+To open an HTML coverage report:
+
+```bash
+uv run pytest tests/ --cov --cov-report=html
 open htmlcov/index.html
 ```
 
-## Claude Desktop Bundle
+### Test coverage
 
-Claude Desktop installs personal plugins as `.mcpb` bundles, not from a marketplace. To produce one:
+| Module | Coverage | Status |
+|--------|----------|--------|
+| `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV host pinning |
+| `servers/email_mcp.py` | ~59% | Helpers, account IO, message assembly, vCard/iCal formatters, IMAP read flows, CardDAV/CalDAV/Sieve tool flows, autodiscover orchestrator |
+
+Coverage is being increased phase by phase (see roadmap below) starting with the modules that have the highest blast radius (security, autodiscovery, server interaction). Three real bugs and one security fix have been surfaced by this coverage work so far.
+
+<details>
+<summary>Coverage roadmap (steps 1–8 ✅ done)</summary>
+
+1. ✅ Account management (`tests/test_account_io.py`)
+2. ✅ Message formatting (`tests/test_message_building.py`)
+3. ✅ vCard / iCal formatting (`tests/test_dav_formatting.py`)
+4. ✅ IMAP tool flows (`tests/test_imap_tool_flows.py`)
+5. ✅ CardDAV tool flows (`tests/test_carddav_tool_flows.py`)
+6. ✅ CalDAV tool flows (`tests/test_caldav_tool_flows.py`)
+7. ✅ Sieve tool flows (`tests/test_sieve_tool_flows.py`)
+8. ✅ Autodiscover orchestrator (`tests/test_autodiscover_orchestrator.py`)
+9. Remaining IMAP/account write paths — `email_add_account`, `email_create_folder`/`delete_folder`, `email_move_message`, `email_reply`, `email_forward`
+10. Discovery sources — `_try_mozilla_autoconfig`, `_try_microsoft_autodiscover`, `_try_dns_srv`, `_try_wellknown_dav` against canned HTTP/DNS responses
+</details>
+
+### Build the Desktop bundle locally
 
 ```bash
 bash scripts/pack-mcpb.sh
 ```
 
-This reads `manifest.json`, packs the tree (minus `.mcpbignore` entries), and writes `.mcpb-cache/multi-mail-<version>.mcpb`. Drag the resulting file onto Claude Desktop → Customize → Personal plugins (or use the ⋮ menu on an existing entry to replace).
+Writes `.mcpb-cache/multi-mail-<version>.mcpb`. The script enforces that the three version fields (`manifest.json`, `.claude-plugin/plugin.json`, `pyproject.toml`) match — releases will fail otherwise. CI (`.github/workflows/release.yml`) packs and publishes the bundle automatically on every version bump pushed to `main`.
 
-Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.yml`) and attach it to the GitHub release.
+For deeper contributor notes, see [CLAUDE.md](CLAUDE.md).
+
+---
+
+## Components
+
+| Component | Description |
+|-----------|-------------|
+| **MCP Server** (`servers/email_mcp.py`) | Python/FastMCP server exposing 31 tools |
+| **Security helpers** (`servers/_security.py`) | SSRF guard, TLS redirect hook, DAV host pinning |
+| **Workflow skill** (`skills/email-workflows/`) | Workflow guidance, IMAP search syntax cheatsheet, Sieve language reference |
+| **Slash commands** | `/email-add-account`, `/email-remove-account`, `/email-list-accounts` |
+
+---
 
 ## Changelog
 
 ### 0.3.7 — tool flow coverage milestone
 
-No runtime changes — but a substantial test investment. Coverage of `email_mcp.py` went from **24% to 59%** (`_security.py` at 96%, project total 60%). 62 new tests across five files:
-
-- **IMAP tool flows** (`tests/test_imap_tool_flows.py`, 10 tests) — `email_list_folders`, `email_search_messages`, `email_read_message` driven by a `_FakeIMAP` that records `select`/`uid`/`list` calls.
-- **CardDAV tool flows** (`tests/test_carddav_tool_flows.py`, 14 tests) — every `card_*` tool against monkeypatched DAV helpers and a fake httpx client.
-- **CalDAV tool flows** (`tests/test_caldav_tool_flows.py`, 13 tests) — every `cal_*` tool against hand-rolled `_FakeClient` / `_FakeCalendar` / `_FakeEvent`.
-- **Sieve tool flows** (`tests/test_sieve_tool_flows.py`, 16 tests) — every `email_sieve_*` tool against a fake ManageSieve with per-method error injection.
-- **Autodiscover orchestrator** (`tests/test_autodiscover_orchestrator.py`, 9 tests) — `_autodiscover` priority/merge/template-expansion with all four `_try_*` sources stubbed.
+No runtime changes — but a substantial test investment. Coverage of `email_mcp.py` went from **24% to 59%** (`_security.py` at 96%, project total 60%). 62 new tests across five files covering the IMAP, CardDAV, CalDAV, Sieve tool flows and the autodiscover orchestrator.
 
 ### 0.3.6 — calendar UID fix + DAV formatter tests
 
-- **Fixed:** `_format_event` returned the literal string `"{''}"` as the UID for any iCalendar event missing a UID property. The default for `getattr` was written as a set literal `{getattr(...)}` instead of a string. Now defaults to `""` cleanly.
-- **Added:** `tests/test_dav_formatting.py` covering full / minimal / UID-less / parse-error paths for `_format_event` and `_format_contact` (multiple emails/tels, missing optional fields).
-- **Coverage:** 31% → 33%.
+- **Fixed:** `_format_event` returned the literal string `"{''}"` as the UID for any iCalendar event missing a UID property. Coverage 31% → 33%.
 
 ### 0.3.5 — accounts.json permissions
 
-- **Fixed (security):** `_save_accounts` wrote `accounts.json` (containing plaintext credentials) with the process umask — typically `0644`, world-readable. The file and its parent directory are now created with `0o600` / `0o700` respectively on POSIX systems via `os.open(..., 0o600)` + an explicit `chmod`. No change on Windows (rely on the user profile ACL).
-- **Added:** `tests/test_account_io.py` — round-trip persistence, parent-directory creation, permission enforcement, and `_get_account` lookup/not-found paths.
+- **Fixed (security):** `_save_accounts` wrote `accounts.json` with the process umask — typically `0644`, world-readable. Now created with `0o600` / `0o700` via `os.open` + explicit `chmod` on POSIX.
 
 ### 0.3.4 — header decoding + helper coverage
 
-- **Fixed:** `_decode_header` produced doubled spaces in mixed encoded/plain headers (`"Hällo  World"`) because the segment join inserted a space on top of segment-internal whitespace. Now concatenates without inserting.
-- **Fixed:** `_decode_header` crashed with `LookupError` when an email header declared an unknown charset (common in spam). Now falls back to UTF-8 with replacement.
-- **Added:** Unit tests for `_decode_header`, `_get_body`, `_summarise_msg`, `_domain_from_email`, and `_map_socket_type` (`tests/test_helpers.py`). Coverage 23% → 27%.
-- **Added:** "Test Coverage" section in README with per-module breakdown and roadmap.
+- **Fixed:** `_decode_header` produced doubled spaces in mixed encoded/plain headers and crashed with `LookupError` on unknown charsets (common in spam). Both fixed; coverage 23% → 27%.
 
 ### 0.3.3 — CardDAV host pinning
 
-- **Fixed (security):** CardDAV `<href>` elements returned by the server were used directly to build authenticated PUT/DELETE/REPORT requests. A compromised or MITM'd DAV server could return a cross-origin href and trick the client into sending HTTP Basic credentials to an attacker. The SSRF guard did not catch this because the attacker host is a normal public IP. The new `resolve_dav_url()` helper resolves every href against the configured `carddav_url` base and rejects cross-host results.
-- **Added:** Regression tests for the host pin (`tests/test_dav_url_pinning.py`).
+- **Fixed (security):** A compromised or MITM'd CardDAV server could return cross-origin `<href>` elements and trick the client into sending HTTP Basic credentials to an attacker. `resolve_dav_url()` now pins every href to the configured `carddav_url` host.
 
 ### 0.3.2 — Sieve fix
 
-- **Fixed:** ManageSieve connections failed with `[Errno 61] Connection refused` for every account. `_sieve_connect` used `acct.get("sieve_host", acct["imap_host"])`, which returns `None` (not the IMAP host) when the saved JSON has `"sieve_host": null` — the schema's default. `socket.create_connection((None, 4190))` then dialed localhost. Now falls back via truthy-OR. Same fix applied to `sieve_port`, `sieve_security`, and `sieve_allow_insecure`.
-- **Added:** Regression tests for Sieve parameter resolution (`tests/test_sieve_config.py`).
+- **Fixed:** ManageSieve connections failed with `[Errno 61] Connection refused` for every account because `dict.get("sieve_host", imap_host)` returns `None` (not the IMAP host) when the saved JSON has `"sieve_host": null`. Now falls back via truthy-OR.
 - **Added:** `LICENSE` (MIT) and `SECURITY.md`.
 
 ### 0.3.1 — packaging
 
-- **Added:** Claude Desktop `.mcpb` bundle (`manifest.json`, `scripts/pack-mcpb.sh`).
-- **Added:** GitHub Actions workflow that detects version bumps and publishes a release with the bundle attached.
+- Claude Desktop `.mcpb` bundle, pack script, and auto-release CI workflow.
 
 ### 0.3.0 — security release
 
-- **Fixed (security):** Autodiscovery and CardDAV requests now verify TLS certificates by default. Previous releases hardcoded `verify=False`, letting on-path attackers forge XML to redirect IMAP/SMTP/DAV traffic to malicious hosts and harvest credentials.
-- **Fixed (security):** Added an SSRF guard that resolves every requested host (and each redirect hop) and refuses connections to loopback, RFC1918, link-local, multicast, reserved, and known cloud-metadata addresses.
-- **Fixed (security):** XML parsing of untrusted server responses uses `defusedxml`.
-- **Fixed (data loss):** `email_move_message` uses RFC 4315 UIDPLUS `UID EXPUNGE` instead of a bare `EXPUNGE`. The previous behaviour would remove every `\Deleted` message in the source folder. If the server doesn't advertise UIDPLUS, the move is refused after the copy.
-- **Fixed (perf):** Blocking IMAP / SMTP / ManageSieve work no longer freezes the FastMCP event loop — each affected tool body now runs in `asyncio.to_thread`.
-- **Added:** pytest suite for the SSRF guard, the redirect hook, and the autodiscover XML parsers (incl. a billion-laughs fixture).
+- TLS verification by default on autodiscovery + CardDAV.
+- SSRF guard.
+- `defusedxml` for untrusted XML.
+- UIDPLUS `UID EXPUNGE` (no more accidental wipe of `\Deleted` siblings on move).
+- All blocking IMAP/SMTP/ManageSieve work runs in `asyncio.to_thread`.
 
 ### 0.2.0
 
 Initial release.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Contributing
+
+Bug reports, security advisories, and PRs welcome. See [SECURITY.md](SECURITY.md) for the vulnerability reporting workflow and [CLAUDE.md](CLAUDE.md) for contributor notes.
