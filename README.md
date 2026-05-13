@@ -176,7 +176,7 @@ blast radius (security, autodiscovery, server interaction).
 | Module | Coverage | Status |
 |--------|----------|--------|
 | `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV URL pinning — covered |
-| `servers/email_mcp.py` | 44% | Pure helpers, account file IO, outbound message assembly, vCard/iCal formatters, IMAP list/search/read flows, and CardDAV tool flows covered; CalDAV tool flows and autodiscover orchestrator remaining |
+| `servers/email_mcp.py` | 50% | Pure helpers, account file IO, outbound message assembly, vCard/iCal formatters, IMAP list/search/read flows, CardDAV tool flows, and CalDAV tool flows covered; autodiscover orchestrator + Sieve tool flows remaining |
 
 Coverage roadmap:
 
@@ -185,8 +185,9 @@ Coverage roadmap:
 3. ✅ **vCard / iCal formatting** — `_format_event`, `_format_contact` against canned fixtures (`tests/test_dav_formatting.py`).
 4. ✅ **IMAP tool flows** — `email_list_folders`, `email_search_messages`, `email_read_message` against a `_FakeIMAP` (`tests/test_imap_tool_flows.py`). _(Originally scoped as "search syntax builders"; re-scoped because the plugin passes raw IMAP SEARCH through.)_
 5. ✅ **CardDAV tool flows** — `card_list_addressbooks`, `card_list_contacts`, `card_search_contacts`, `card_get_contact`, `card_create_contact`, `card_delete_contact` against monkeypatched DAV helpers + a fake httpx client (`tests/test_carddav_tool_flows.py`).
-6. **CalDAV tool flows** — `cal_*` tools (needs `caldav` library mocking, different shape than CardDAV httpx).
-7. **Autodiscover orchestrator** — `_autodiscover` against mocked Mozilla/Microsoft/DNS-SRV/well-known paths.
+6. ✅ **CalDAV tool flows** — `cal_list_calendars`, `cal_list_events`, `cal_get_event`, `cal_create_event`, `cal_update_event`, `cal_delete_event` via hand-rolled `_FakeClient` / `_FakeCalendar` / `_FakeEvent` (`tests/test_caldav_tool_flows.py`).
+7. **Sieve tool flows** — `email_sieve_*` with a fake ManageSieve connection.
+8. **Autodiscover orchestrator** — `_autodiscover` against mocked Mozilla/Microsoft/DNS-SRV/well-known paths.
 
 To run coverage locally:
 
