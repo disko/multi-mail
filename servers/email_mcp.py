@@ -46,7 +46,7 @@ import vobject
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from _security import safe_async_client
+from _security import resolve_dav_url, safe_async_client
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -2396,12 +2396,7 @@ async def _carddav_propfind(acct: Dict[str, Any]) -> List[Dict[str, str]]:
 async def _carddav_list_vcards(acct: Dict[str, Any], book_href: str) -> List[Tuple[str, str]]:
     """List all vCards in an address book. Returns [(href, vcard_data), ...]."""
     base_url = acct.get("carddav_url", "")
-    # Build full URL from book_href
-    if book_href.startswith("http"):
-        full_url = book_href
-    else:
-        from urllib.parse import urljoin
-        full_url = urljoin(base_url, book_href)
+    full_url = resolve_dav_url(base_url, book_href)
 
     body = """<?xml version="1.0" encoding="utf-8"?>
 <card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
@@ -2673,18 +2668,16 @@ async def card_create_contact(params: CardCreateContactInput) -> str:
 
         vcard_data = vc.serialize()
 
-        # PUT the vCard to the address book
         base_url = acct.get("carddav_url", "")
-        from urllib.parse import urljoin
-        if book_href.startswith("http"):
-            put_url = f"{book_href.rstrip('/')}/{uid}.vcf"
-        else:
-            put_url = urljoin(base_url, f"{book_href.rstrip('/')}/{uid}.vcf")
+        put_url = resolve_dav_url(base_url, f"{book_href.rstrip('/')}/{uid}.vcf")
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
+        # resolve_dav_url() pins the URL host to the configured carddav_url, so
+        # a compromised DAV server cannot redirect this auth'd PUT to an attacker.
+        # Covered by tests/test_dav_url_pinning.py.
         async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
-            resp = await client.put(
+            resp = await client.put(  # nosemgrep: python.mcp.mcp-auth-passthrough-taint.mcp-auth-passthrough-taint
                 put_url,
                 content=vcard_data,
                 headers={"Content-Type": "text/vcard; charset=utf-8"},
@@ -2763,18 +2756,18 @@ async def card_update_contact(params: CardUpdateContactInput) -> str:
 
         # PUT updated vCard
         base_url = acct.get("carddav_url", "")
-        from urllib.parse import urljoin
-        if target_href and target_href.startswith("http"):
-            put_url = target_href
-        elif target_href:
-            put_url = urljoin(base_url, target_href)
-        else:
-            put_url = urljoin(base_url, f"{book_href.rstrip('/')}/{params.uid}.vcf")
+        put_url = resolve_dav_url(
+            base_url,
+            target_href or f"{book_href.rstrip('/')}/{params.uid}.vcf",
+        )
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
+        # resolve_dav_url() pins the URL host to the configured carddav_url, so
+        # a compromised DAV server cannot redirect this auth'd PUT to an attacker.
+        # Covered by tests/test_dav_url_pinning.py.
         async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
-            resp = await client.put(
+            resp = await client.put(  # nosemgrep: python.mcp.mcp-auth-passthrough-taint.mcp-auth-passthrough-taint
                 put_url,
                 content=vc.serialize(),
                 headers={"Content-Type": "text/vcard; charset=utf-8"},
@@ -2825,11 +2818,7 @@ async def card_delete_contact(params: CardDeleteContactInput) -> str:
             return f"Contact with UID '{params.uid}' not found."
 
         base_url = acct.get("carddav_url", "")
-        from urllib.parse import urljoin
-        if target_href.startswith("http"):
-            del_url = target_href
-        else:
-            del_url = urljoin(base_url, target_href)
+        del_url = resolve_dav_url(base_url, target_href)
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)

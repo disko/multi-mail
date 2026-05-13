@@ -88,6 +88,36 @@ def _check_url_safe(url: str) -> None:
         raise httpx.RequestError(f"refused by SSRF guard ({reason}): {url}")
 
 
+def resolve_dav_url(account_base: str, target: str) -> str:
+    """Resolve *target* relative to *account_base* and pin it to the same host.
+
+    DAV servers return ``<href>`` elements in PROPFIND/REPORT responses that the
+    client uses to build follow-up authenticated requests. A compromised (or
+    MITM'd) server could return a cross-origin href and trick the client into
+    sending HTTP Basic credentials to an attacker. The SSRF guard does not stop
+    this because the attacker host is a normal public IP.
+
+    Pin the resolved URL to the host of the configured account base. Reject
+    cross-origin redirects.
+    """
+    if not account_base:
+        raise ValueError("DAV account URL is not configured")
+    base_host = urlparse(account_base).hostname
+    if not base_host:
+        raise ValueError(f"DAV account URL has no host: {account_base!r}")
+
+    from urllib.parse import urljoin
+
+    full = target if target.startswith(("http://", "https://")) else urljoin(account_base, target)
+    final_host = urlparse(full).hostname
+    if not final_host or final_host.lower() != base_host.lower():
+        raise httpx.RequestError(
+            f"refused: DAV server returned href on a different host "
+            f"({final_host!r} != configured {base_host!r}): {full}"
+        )
+    return full
+
+
 async def _enforce_ssrf_on_request(request: httpx.Request) -> None:
     """httpx event hook — runs on every request, including each redirect hop."""
     _check_url_safe(str(request.url))

@@ -180,6 +180,11 @@ Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.ym
 
 ## Changelog
 
+### 0.3.3 — CardDAV host pinning
+
+- **Fixed (security):** CardDAV `<href>` elements returned by the server were used directly to build authenticated PUT/DELETE/REPORT requests. A compromised or MITM'd DAV server could return a cross-origin href and trick the client into sending HTTP Basic credentials to an attacker. The SSRF guard did not catch this because the attacker host is a normal public IP. The new `resolve_dav_url()` helper resolves every href against the configured `carddav_url` base and rejects cross-host results.
+- **Added:** Regression tests for the host pin (`tests/test_dav_url_pinning.py`).
+
 ### 0.3.2 — Sieve fix
 
 - **Fixed:** ManageSieve connections failed with `[Errno 61] Connection refused` for every account. `_sieve_connect` used `acct.get("sieve_host", acct["imap_host"])`, which returns `None` (not the IMAP host) when the saved JSON has `"sieve_host": null` — the schema's default. `socket.create_connection((None, 4190))` then dialed localhost. Now falls back via truthy-OR. Same fix applied to `sieve_port`, `sieve_security`, and `sieve_allow_insecure`.
