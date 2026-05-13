@@ -21,11 +21,25 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - name: Set up Python
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv python install "$PYTHON_VERSION"
 
       - name: Install dev dependencies
-        run: uv sync --group dev --python ${{ matrix.python-version }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv sync --group dev --python "$PYTHON_VERSION"
 
       - name: Run tests
-        run: uv run --python ${{ matrix.python-version }} pytest tests/ -v
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv run --python "$PYTHON_VERSION" pytest tests/ -v --cov --cov-report=xml --cov-report=term
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          flags: unittests
+          fail_ci_if_error: false

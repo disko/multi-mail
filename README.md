@@ -1,6 +1,7 @@
 # Multi-Mail Plugin
 
 [![tests](https://github.com/disko/multi-mail/actions/workflows/test.yml/badge.svg)](https://github.com/disko/multi-mail/actions/workflows/test.yml)
+[![coverage](https://codecov.io/gh/disko/multi-mail/branch/main/graph/badge.svg)](https://codecov.io/gh/disko/multi-mail)
 
 Connect Claude to multiple self-hosted mail servers — IMAP, SMTP, Sieve filters, CalDAV calendars, and CardDAV contacts.
 
