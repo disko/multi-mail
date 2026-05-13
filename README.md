@@ -176,12 +176,12 @@ blast radius (security, autodiscovery, server interaction).
 | Module | Coverage | Status |
 |--------|----------|--------|
 | `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV URL pinning — covered |
-| `servers/email_mcp.py` | 24% | Pure helpers covered; IMAP/SMTP/DAV protocol layer needs an integration harness |
+| `servers/email_mcp.py` | 28% | Pure helpers, account file IO, and outbound message assembly covered; IMAP/DAV read paths still need work |
 
-Coverage roadmap (each bullet is a follow-up PR):
+Coverage roadmap:
 
-1. **Account management** — `_load_accounts`, `_save_accounts`, `_get_account` (file IO with tmp_path fixture).
-2. **Message formatting** — `_build_message`, `_send_message` payload assembly (no SMTP).
+1. ✅ **Account management** — `_load_accounts`, `_save_accounts`, `_get_account` (`tests/test_account_io.py`).
+2. ✅ **Message formatting** — `_build_message`, `_send_message` recipient/Sent fan-out (`tests/test_message_building.py`).
 3. **vCard / iCal formatting** — `_format_event`, `_format_contact` against canned fixtures.
 4. **IMAP search syntax** — string-builders for search queries (pure).
 5. **Tool integration** — mocked IMAP/SMTP/DAV via `aioresponses` / `pytest-imap-server` once the unit floor is solid.
