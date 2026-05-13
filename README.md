@@ -212,6 +212,16 @@ Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.ym
 
 ## Changelog
 
+### 0.3.7 — tool flow coverage milestone
+
+No runtime changes — but a substantial test investment. Coverage of `email_mcp.py` went from **24% to 59%** (`_security.py` at 96%, project total 60%). 62 new tests across five files:
+
+- **IMAP tool flows** (`tests/test_imap_tool_flows.py`, 10 tests) — `email_list_folders`, `email_search_messages`, `email_read_message` driven by a `_FakeIMAP` that records `select`/`uid`/`list` calls.
+- **CardDAV tool flows** (`tests/test_carddav_tool_flows.py`, 14 tests) — every `card_*` tool against monkeypatched DAV helpers and a fake httpx client.
+- **CalDAV tool flows** (`tests/test_caldav_tool_flows.py`, 13 tests) — every `cal_*` tool against hand-rolled `_FakeClient` / `_FakeCalendar` / `_FakeEvent`.
+- **Sieve tool flows** (`tests/test_sieve_tool_flows.py`, 16 tests) — every `email_sieve_*` tool against a fake ManageSieve with per-method error injection.
+- **Autodiscover orchestrator** (`tests/test_autodiscover_orchestrator.py`, 9 tests) — `_autodiscover` priority/merge/template-expansion with all four `_try_*` sources stubbed.
+
 ### 0.3.6 — calendar UID fix + DAV formatter tests
 
 - **Fixed:** `_format_event` returned the literal string `"{''}"` as the UID for any iCalendar event missing a UID property. The default for `getattr` was written as a set literal `{getattr(...)}` instead of a string. Now defaults to `""` cleanly.
