@@ -179,6 +179,11 @@ Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.ym
 
 ## Changelog
 
+### 0.3.1 — packaging
+
+- **Added:** Claude Desktop `.mcpb` bundle (`manifest.json`, `scripts/pack-mcpb.sh`).
+- **Added:** GitHub Actions workflow that detects version bumps and publishes a release with the bundle attached.
+
 ### 0.3.0 — security release
 
 - **Fixed (security):** Autodiscovery and CardDAV requests now verify TLS certificates by default. Previous releases hardcoded `verify=False`, letting on-path attackers forge XML to redirect IMAP/SMTP/DAV traffic to malicious hosts and harvest credentials.
