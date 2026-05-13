@@ -75,11 +75,38 @@ def _load_accounts() -> List[Dict[str, Any]]:
 
 
 def _save_accounts(accounts: List[Dict[str, Any]]) -> None:
-    """Persist accounts to the JSON config file."""
+    """Persist accounts to the JSON config file.
+
+    Enforces ``0700`` on the parent directory and ``0600`` on the file because
+    the JSON contains plaintext credentials. POSIX-only; on Windows the chmod
+    is a no-op and you should rely on the user profile ACL.
+    """
     path = Path(CONFIG_PATH).expanduser()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump({"accounts": accounts}, f, indent=2)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # 0o700 on the dir / 0o600 on the file is owner-only access. semgrep's
+    # default-permission rule treats this as "widely permissive" — wrong here:
+    # the file holds plaintext credentials and the user is the only legitimate
+    # reader. See SECURITY.md.
+    if os.name == "posix":
+        try:
+            os.chmod(path.parent, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+        except OSError:
+            pass
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({"accounts": accounts}, f, indent=2)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
+    if os.name == "posix":
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
 
 def _get_account(account_id: str) -> Dict[str, Any]:

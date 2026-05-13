@@ -163,7 +163,7 @@ Just ask Claude things like:
 - Autodiscovery (Mozilla autoconfig, Microsoft Autodiscover, well-known DAV) and all CardDAV requests verify TLS certificates and pass every URL — including each redirect hop — through an SSRF guard that refuses connections to loopback, RFC1918, link-local, multicast, reserved, and known cloud-metadata addresses.
 - Set `MULTI_MAIL_ALLOW_PRIVATE_AUTODISCOVER=1` only on lab networks with a known autodiscovery endpoint.
 - XML responses from untrusted servers are parsed with `defusedxml`, refusing entity-expansion / billion-laughs payloads.
-- Account passwords are still stored in plaintext in `~/.claude/multi-mail-accounts.json`. Migration to OS keychain (`keyring`) is tracked for a future release; for now, make sure the file is mode `0600` and its parent directory `0700`.
+- Account passwords are still stored in plaintext in `~/.claude/multi-mail-accounts.json`. Migration to OS keychain (`keyring`) is tracked for a future release. The plugin now enforces `0600` on the file and `0700` on its parent directory on POSIX systems; if you edited the file before v0.3.5, double-check the modes manually.
 - Inbound HTML email bodies are still returned to the model verbatim — treat them as untrusted input. A forthcoming release will strip HTML and prefix with an "untrusted content" delimiter.
 
 ## Test Coverage
@@ -206,6 +206,11 @@ This reads `manifest.json`, packs the tree (minus `.mcpbignore` entries), and wr
 Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.yml`) and attach it to the GitHub release.
 
 ## Changelog
+
+### 0.3.5 — accounts.json permissions
+
+- **Fixed (security):** `_save_accounts` wrote `accounts.json` (containing plaintext credentials) with the process umask — typically `0644`, world-readable. The file and its parent directory are now created with `0o600` / `0o700` respectively on POSIX systems via `os.open(..., 0o600)` + an explicit `chmod`. No change on Windows (rely on the user profile ACL).
+- **Added:** `tests/test_account_io.py` — round-trip persistence, parent-directory creation, permission enforcement, and `_get_account` lookup/not-found paths.
 
 ### 0.3.4 — header decoding + helper coverage
 
