@@ -176,15 +176,16 @@ blast radius (security, autodiscovery, server interaction).
 | Module | Coverage | Status |
 |--------|----------|--------|
 | `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV URL pinning — covered |
-| `servers/email_mcp.py` | 30% | Pure helpers, account file IO, outbound message assembly, and vCard/iCal formatters covered; IMAP/DAV read paths still need work |
+| `servers/email_mcp.py` | 35% | Pure helpers, account file IO, outbound message assembly, vCard/iCal formatters, and the IMAP list/search/read tool flows covered; CardDAV/CalDAV tool flows and autodiscover orchestrator remaining |
 
 Coverage roadmap:
 
 1. ✅ **Account management** — `_load_accounts`, `_save_accounts`, `_get_account` (`tests/test_account_io.py`).
 2. ✅ **Message formatting** — `_build_message`, `_send_message` recipient/Sent fan-out (`tests/test_message_building.py`).
 3. ✅ **vCard / iCal formatting** — `_format_event`, `_format_contact` against canned fixtures (`tests/test_dav_formatting.py`).
-4. **IMAP search syntax** — string-builders for search queries (pure).
-5. **Tool integration** — mocked IMAP/SMTP/DAV via `aioresponses` / `pytest-imap-server` once the unit floor is solid.
+4. ✅ **IMAP tool flows** — `email_list_folders`, `email_search_messages`, `email_read_message` against a `_FakeIMAP` (`tests/test_imap_tool_flows.py`). _(Originally scoped as "search syntax builders"; re-scoped because the plugin passes raw IMAP SEARCH through.)_
+5. **CardDAV/CalDAV tool flows** — mocked DAV PROPFIND/REPORT responses for `card_*` and `cal_*` tools.
+6. **Autodiscover orchestrator** — `_autodiscover` against mocked Mozilla/Microsoft/DNS-SRV/well-known paths.
 
 To run coverage locally:
 
