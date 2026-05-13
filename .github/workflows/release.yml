@@ -105,6 +105,7 @@ jobs:
           name: multi-mail-mcpb
           path: .mcpb-cache/*.mcpb
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Create or move tag
         env:
