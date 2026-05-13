@@ -252,7 +252,7 @@ def _format_event(event: caldav.Event) -> Dict[str, str]:
         vcal = vobject.readOne(event.data)
         vevent = vcal.vevent
         result = {
-            "uid": str(getattr(vevent, "uid", {getattr(vevent, "value", "")})),
+            "uid": "",
             "summary": str(getattr(vevent.summary, "value", "")) if hasattr(vevent, "summary") else "",
             "dtstart": "",
             "dtend": "",

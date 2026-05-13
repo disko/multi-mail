@@ -176,13 +176,13 @@ blast radius (security, autodiscovery, server interaction).
 | Module | Coverage | Status |
 |--------|----------|--------|
 | `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV URL pinning — covered |
-| `servers/email_mcp.py` | 28% | Pure helpers, account file IO, and outbound message assembly covered; IMAP/DAV read paths still need work |
+| `servers/email_mcp.py` | 30% | Pure helpers, account file IO, outbound message assembly, and vCard/iCal formatters covered; IMAP/DAV read paths still need work |
 
 Coverage roadmap:
 
 1. ✅ **Account management** — `_load_accounts`, `_save_accounts`, `_get_account` (`tests/test_account_io.py`).
 2. ✅ **Message formatting** — `_build_message`, `_send_message` recipient/Sent fan-out (`tests/test_message_building.py`).
-3. **vCard / iCal formatting** — `_format_event`, `_format_contact` against canned fixtures.
+3. ✅ **vCard / iCal formatting** — `_format_event`, `_format_contact` against canned fixtures (`tests/test_dav_formatting.py`).
 4. **IMAP search syntax** — string-builders for search queries (pure).
 5. **Tool integration** — mocked IMAP/SMTP/DAV via `aioresponses` / `pytest-imap-server` once the unit floor is solid.
 
@@ -206,6 +206,12 @@ This reads `manifest.json`, packs the tree (minus `.mcpbignore` entries), and wr
 Tagged releases (`vX.Y.Z`) build the bundle in CI (`.github/workflows/release.yml`) and attach it to the GitHub release.
 
 ## Changelog
+
+### 0.3.6 — calendar UID fix + DAV formatter tests
+
+- **Fixed:** `_format_event` returned the literal string `"{''}"` as the UID for any iCalendar event missing a UID property. The default for `getattr` was written as a set literal `{getattr(...)}` instead of a string. Now defaults to `""` cleanly.
+- **Added:** `tests/test_dav_formatting.py` covering full / minimal / UID-less / parse-error paths for `_format_event` and `_format_contact` (multiple emails/tels, missing optional fields).
+- **Coverage:** 31% → 33%.
 
 ### 0.3.5 — accounts.json permissions
 
