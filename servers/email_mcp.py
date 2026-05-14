@@ -193,10 +193,24 @@ def _resolve_sieve_params(acct: Dict[str, Any]) -> Tuple[str, int, str, bool]:
 
 
 def _sieve_connect(acct: Dict[str, Any]) -> ms.MANAGESIEVE:
-    """Return an authenticated ManageSieve connection for *acct*."""
-    host, port, security, allow_insecure = _resolve_sieve_params(acct)
+    """Return an authenticated ManageSieve connection for *acct*.
 
+    Errors surface a small diagnostic blob — which security mode was used,
+    the host:port, and whether the server advertised any SASL mechanisms —
+    so users don't have to read the managesieve library source to figure out
+    why ``No matching authentication mechanism found`` fired.
+    """
+    host, port, security, allow_insecure = _resolve_sieve_params(acct)
     use_tls = security == "starttls"
+
+    def _ctx() -> str:
+        mechs = getattr(conn, "loginmechs", [])
+        return (
+            f"sieve://{host}:{port} security={security!r} "
+            f"tls_verify={not allow_insecure} "
+            f"server_mechanisms={mechs or 'none advertised'}"
+        )
+
     conn = ms.MANAGESIEVE(
         host,
         port=port,
@@ -205,10 +219,36 @@ def _sieve_connect(acct: Dict[str, Any]) -> ms.MANAGESIEVE:
         timeout=30,
     )
 
-    # Authenticate — use PLAIN mechanism via login()
-    result = conn.login("PLAIN", acct["username"], acct["password"])
+    if not conn.loginmechs:
+        # Empty mechanism list after construction means either (a) security
+        # is "none" / wrong and we're sitting on a plaintext connection where
+        # the server refuses to advertise SASL until STARTTLS, or (b) the
+        # server failed to re-advertise post-STARTTLS. Either way, an
+        # AUTHENTICATE call is doomed.
+        hint = ""
+        if security != "starttls":
+            hint = (
+                f" The account has sieve_security={security!r}; most servers "
+                f"require STARTTLS before advertising SASL mechanisms. Try "
+                f"setting sieve_security to \"starttls\" in accounts.json."
+            )
+        raise ConnectionError(
+            f"ManageSieve server advertised no SASL mechanisms — cannot "
+            f"authenticate.{hint} [{_ctx()}]"
+        )
+
+    try:
+        result = conn.login("PLAIN", acct["username"], acct["password"])
+    except ms.MANAGESIEVE.error as e:
+        raise ConnectionError(
+            f"ManageSieve authentication error: {e}. [{_ctx()}]"
+        ) from e
     if result != "OK":
-        raise ConnectionError(f"ManageSieve authentication failed: {result}")
+        raise ConnectionError(
+            f"ManageSieve authentication failed (server returned {result!r}). "
+            f"Check that the username/password match what works for IMAP. "
+            f"[{_ctx()}]"
+        )
     return conn
 
 

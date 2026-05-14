@@ -269,6 +269,11 @@ For deeper contributor notes, see [CLAUDE.md](CLAUDE.md).
 
 ## Changelog
 
+### 0.3.9 — Sieve error diagnostics
+
+- **Improved:** `_sieve_connect` now surfaces *why* a ManageSieve login failed instead of bubbling up the library's bare `No matching authentication mechanism found` / `NO` strings. Every error now includes the host:port, the security mode actually used, TLS verification state, and the SASL mechanisms the server advertised. When the server returns no mechanisms and `sieve_security != "starttls"`, the error explicitly tells the user to change that field in `accounts.json` (which is almost always the fix).
+- **Added:** `tests/test_sieve_diagnostics.py` — 6 tests covering empty-loginmechs path (with and without STARTTLS hint), `login()` returning `NO`, `login()` raising `managesieve.error`, and the happy path.
+
 ### 0.3.8 — coverage roadmap complete
 
 No runtime changes. Roadmap steps 9 and 10 done — every MCP tool flow and every autodiscovery source now has regression coverage.
