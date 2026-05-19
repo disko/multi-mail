@@ -1023,3 +1023,217 @@ def test_resolve_trash_hardcoded_fallback_when_nothing_found():
     """Nothing advertises \\Trash → hard-coded 'Trash' default."""
     conn = _FakeIMAP(list_resp=[b'(\\HasNoChildren) "/" "INBOX"'])
     assert email_mcp._resolve_trash_folder(conn, {}) == "Trash"
+
+
+# ---------------------------------------------------------------------------
+# Outer-except tails & body branches — issue #8 iter-5
+#
+# Every IMAP write/folder/forward/reply/move/delete/expunge tool wraps its
+# body in ``try: …; except Exception as e: return f"Error[…]: {e}"``. The
+# happy-path tests above exercise the inner try; these tests inject a
+# raising ``_imap_connect`` so the outer except fires, plus targeted body-
+# branch tests for CREATE-fail / DELETE-fail / COPY-fail / FETCH-fail /
+# UIDPLUS-missing arms.
+# ---------------------------------------------------------------------------
+
+
+def _raising_imap(monkeypatch, exc):
+    """Override _imap_connect to raise ``exc`` on the next call."""
+    def boom(acct):
+        raise exc
+    monkeypatch.setattr(email_mcp, "_imap_connect", boom)
+
+
+def _make_logout_raiser(fake, exc):
+    """Replace ``fake.logout`` with one that raises ``exc``."""
+    def _raise():
+        raise exc
+    fake.logout = _raise
+
+
+# --- outer-except tails ---------------------------------------------------
+
+
+def test_create_folder_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom create"))
+    result = run(email_mcp.email_create_folder(
+        email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="X")
+    ))
+    assert result.startswith("Error:")
+    assert "boom create" in result
+
+
+def test_delete_folder_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom delete"))
+    result = run(email_mcp.email_delete_folder(
+        email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="X")
+    ))
+    assert result.startswith("Error:")
+    assert "boom delete" in result
+
+
+def test_move_message_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom move"))
+    result = run(email_mcp.email_move_message(
+        email_mcp.MoveEmailInput(
+            account_id=ACCT_ID, uid="1",
+            source_folder="INBOX", dest_folder="Archive",
+        )
+    ))
+    assert result.startswith("Error")
+    assert "boom move" in result
+
+
+def test_delete_message_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom delete msg"))
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(account_id=ACCT_ID, uid="1")
+    ))
+    assert result.startswith("Error")
+    assert "boom delete msg" in result
+
+
+def test_expunge_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom expunge"))
+    result = run(email_mcp.email_expunge(
+        email_mcp.ExpungeInput(account_id=ACCT_ID, uid="1")
+    ))
+    assert result.startswith("Error")
+    assert "boom expunge" in result
+
+
+def test_reply_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom reply"))
+    result = run(email_mcp.email_reply(
+        email_mcp.ReplyEmailInput(
+            account_id=ACCT_ID, uid="1", body="ack", reply_all=False,
+        )
+    ))
+    assert result.startswith("Error")
+    assert "boom reply" in result
+
+
+def test_forward_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom forward"))
+    result = run(email_mcp.email_forward(
+        email_mcp.ForwardEmailInput(
+            account_id=ACCT_ID, uid="1", to="team@example.com",
+        )
+    ))
+    assert result.startswith("Error")
+    assert "boom forward" in result
+
+
+# --- logout-swallow (inner `except Exception: pass`) ----------------------
+
+
+def test_create_folder_swallows_logout_exception(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _make_logout_raiser(imap, OSError("logout fail"))
+    _install_imap(monkeypatch, imap)
+    result = run(email_mcp.email_create_folder(
+        email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="Archive")
+    ))
+    # The happy-path "created" response is still returned — the swallow
+    # caught the logout error.
+    assert "created" in result.lower()
+    assert not result.startswith("Error:")
+
+
+# --- in-body branches: CREATE/DELETE/COPY/FETCH error arms ---------------
+
+
+def test_create_folder_returns_error_on_non_ok_status(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+
+    def _bad_create(folder):
+        return ("NO", [b"server busy"])
+    imap.create = _bad_create
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_create_folder(
+        email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="X")
+    ))
+    assert "Error creating folder" in result
+    assert "server busy" in result
+
+
+def test_delete_folder_returns_error_on_non_ok_status(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+
+    def _bad_delete(folder):
+        return ("NO", [b"server busy"])
+    imap.delete = _bad_delete
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_delete_folder(
+        email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="X")
+    ))
+    assert "Error deleting folder" in result
+    assert "server busy" in result
+
+
+def test_move_message_returns_error_when_copy_fails(stub_account, monkeypatch):
+    imap = _FakeIMAP(capabilities=(b"IMAP4REV1", b"UIDPLUS"))
+    orig_uid = imap.uid
+
+    def _bad_uid(cmd, *args):
+        if cmd == "COPY":
+            return ("NO", [b"quota exceeded"])
+        return orig_uid(cmd, *args)
+    imap.uid = _bad_uid
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_move_message(
+        email_mcp.MoveEmailInput(
+            account_id=ACCT_ID, uid="1",
+            source_folder="INBOX", dest_folder="Archive",
+        )
+    ))
+    assert "Error copying message" in result
+    assert "quota exceeded" in result
+    # No EXPUNGE issued after the COPY failure.
+    assert imap.uid_expunges == []
+
+
+def test_delete_message_move_to_trash_refuses_without_uidplus(stub_account, monkeypatch):
+    imap = _FakeIMAP(capabilities=(b"IMAP4REV1",))  # no UIDPLUS
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX", permanent=False,
+        )
+    ))
+    # The move-to-trash arm refuses without UIDPLUS, BEFORE resolving trash
+    # or issuing COPY. Lines 2118-2123 in servers/email_mcp.py.
+    assert "refusing to issue an untargeted EXPUNGE" in result
+    assert "UIDPLUS" in result
+    assert imap.copied == []
+    assert imap.uid_expunges == []
+    assert imap.bare_expunged is False
+
+
+def test_reply_returns_error_when_original_fetch_fails(stub_account, monkeypatch):
+    # FETCH returns NO for every UID → "Could not fetch message UID …"
+    imap = _FakeIMAP(fetch_bodies={})
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_reply(
+        email_mcp.ReplyEmailInput(
+            account_id=ACCT_ID, uid="999", body="ack", reply_all=False,
+        )
+    ))
+    assert "Error: Could not fetch message UID 999" in result
+
+
+def test_forward_returns_error_when_original_fetch_fails(stub_account, monkeypatch):
+    imap = _FakeIMAP(fetch_bodies={})
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_forward(
+        email_mcp.ForwardEmailInput(
+            account_id=ACCT_ID, uid="999", to="team@example.com",
+        )
+    ))
+    assert "Error: Could not fetch message UID 999" in result

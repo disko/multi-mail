@@ -392,3 +392,83 @@ def test_sieve_rename_deletescript_failure_surfaces_partial(fake):
     assert "old" in result  # old name surfaces in the partial-failure string
     assert "new" in fake.scripts  # new script WAS uploaded
     assert "NO cant delete" in result
+
+
+# ---------------------------------------------------------------------------
+# Inner ``except Exception: pass`` swallow on ``conn.logout()`` — iter-5
+#
+# Iter-4 hit the outer ``except Exception as e:`` by raising in
+# ``_sieve_connect``. That bypasses the inner ``finally`` so the logout
+# swallow stays unhit. These tests configure ``logout()`` itself to raise
+# on a successful happy-path call; the swallow catches it and the user
+# still sees the success string.
+# ---------------------------------------------------------------------------
+
+
+def _make_sieve_logout_raiser(fake, exc):
+    def _raise():
+        raise exc
+    fake.logout = _raise
+
+
+def test_sieve_list_swallows_logout_exception(fake):
+    fake.scripts = {"a": "..."}
+    _make_sieve_logout_raiser(fake, OSError("logout fail"))
+    result = run(email_mcp.email_sieve_list(
+        email_mcp.SieveListInput(account_id=ACCT_ID)
+    ))
+    assert "# Sieve Scripts" in result
+    assert not result.startswith("Error:")
+
+
+def test_sieve_get_swallows_logout_exception(fake):
+    fake.scripts = {"a": "# noop"}
+    _make_sieve_logout_raiser(fake, OSError("logout fail"))
+    result = run(email_mcp.email_sieve_get(
+        email_mcp.SieveGetInput(account_id=ACCT_ID, script_name="a")
+    ))
+    assert "```sieve" in result
+    assert not result.startswith("Error:")
+
+
+def test_sieve_put_swallows_logout_exception(fake):
+    _make_sieve_logout_raiser(fake, OSError("logout fail"))
+    result = run(email_mcp.email_sieve_put(
+        email_mcp.SievePutInput(
+            account_id=ACCT_ID, script_name="x", script_content="# noop", activate=False,
+        )
+    ))
+    assert "uploaded" in result.lower()
+    assert not result.startswith("Error:")
+
+
+def test_sieve_activate_swallows_logout_exception(fake):
+    fake.scripts = {"a": "..."}
+    _make_sieve_logout_raiser(fake, OSError("logout fail"))
+    result = run(email_mcp.email_sieve_activate(
+        email_mcp.SieveActivateInput(account_id=ACCT_ID, script_name="a")
+    ))
+    assert "active filter" in result
+    assert not result.startswith("Error:")
+
+
+def test_sieve_delete_swallows_logout_exception(fake):
+    fake.scripts = {"a": "..."}
+    _make_sieve_logout_raiser(fake, OSError("logout fail"))
+    result = run(email_mcp.email_sieve_delete(
+        email_mcp.SieveDeleteInput(account_id=ACCT_ID, script_name="a")
+    ))
+    assert "deleted" in result.lower()
+    assert not result.startswith("Error:")
+
+
+def test_sieve_rename_swallows_logout_exception(fake):
+    fake.scripts = {"old": "# content"}
+    _make_sieve_logout_raiser(fake, OSError("logout fail"))
+    result = run(email_mcp.email_sieve_rename(
+        email_mcp.SieveRenameInput(
+            account_id=ACCT_ID, old_name="old", new_name="new",
+        )
+    ))
+    assert "renamed" in result.lower()
+    assert not result.startswith("Error:")
