@@ -395,6 +395,80 @@ def _summarise_msg(msg: email.message.Message, uid: str) -> Dict[str, str]:
     }
 
 
+def _parse_imap_list_line(item: Any) -> Optional[str]:
+    """Extract the mailbox name from a single ``IMAP4.list()`` response item.
+
+    RFC 3501 §9 allows the mailbox name in a ``LIST`` response to be:
+      - a quoted string:  ``(\\HasNoChildren) "/" "INBOX"``
+      - an atom:          ``(\\HasNoChildren) "/" INBOX``  (Dovecot/mailcow do this)
+      - a literal:        ``(\\HasNoChildren) "/" {5}\\r\\nINBOX``
+    imaplib returns literal-form responses as a tuple ``(header_bytes,
+    literal_bytes)``; everything else arrives as a single bytes object.
+
+    Returns the mailbox name as a ``str``, or ``None`` if the line is empty
+    or unparseable (caller should skip it).
+    """
+    # Literal-form: imaplib already separated the literal payload.
+    if isinstance(item, tuple):
+        if len(item) >= 2 and item[1] is not None:
+            try:
+                return item[1].decode("utf-8", errors="replace")
+            except (AttributeError, UnicodeDecodeError):
+                return None
+        return None
+
+    if not isinstance(item, (bytes, bytearray)):
+        return None
+
+    text = bytes(item).decode("utf-8", errors="replace").strip()
+    if not text:
+        return None
+
+    # Skip the leading parenthesised flags group: "(\HasNoChildren \Marked)".
+    if text.startswith("("):
+        depth = 0
+        for i, ch in enumerate(text):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    text = text[i + 1 :].lstrip()
+                    break
+        else:
+            # Unbalanced parens — give up rather than emit garbage.
+            return None
+
+    # Next token is the delimiter: either a quoted string or the atom NIL.
+    if text.startswith('"'):
+        end = text.find('"', 1)
+        if end == -1:
+            return None
+        text = text[end + 1 :].lstrip()
+    else:
+        # Atom delimiter (e.g. NIL). Consume until next whitespace.
+        parts = text.split(None, 1)
+        if len(parts) < 2:
+            return None
+        text = parts[1].lstrip()
+
+    if not text:
+        return None
+
+    # Finally, the mailbox name: quoted string or atom (rest of the line).
+    if text.startswith('"'):
+        end = text.find('"', 1)
+        if end == -1:
+            return None
+        return text[1:end]
+    # Atom: per RFC 3501 §9, atoms contain no whitespace; take the last
+    # token to be defensive against trailing whitespace/CRLF residue.
+    tokens = text.split()
+    if not tokens:
+        return None
+    return tokens[-1]
+
+
 # ---------------------------------------------------------------------------
 # Pydantic input models
 # ---------------------------------------------------------------------------
@@ -1237,17 +1311,11 @@ async def email_list_folders(params: ListFoldersInput) -> str:
                     return f"Error: IMAP LIST failed: {status}"
                 folders = []
                 for item in data:
-                    if isinstance(item, bytes):
-                        # Parse: (\\Flags) "delimiter" "name"
-                        parts = item.decode("utf-8", errors="replace")
-                        # Extract folder name after last quote pair
-                        try:
-                            name = parts.rsplit('"', 2)[-2]
-                        except IndexError:
-                            name = parts.split()[-1]
+                    name = _parse_imap_list_line(item)
+                    if name:
                         folders.append(name)
                 folders.sort()
-                lines = [f"# Folders for {acct.get('display_name', params.account_id)}\n"]
+                lines = [f"# Folders for {acct.get('display_name') or params.account_id}\n"]
                 for f in folders:
                     lines.append(f"- {f}")
                 return "\n".join(lines)
@@ -1393,7 +1461,7 @@ async def email_list_messages(params: ListEmailsInput) -> str:
                 total = len(uids)
                 showing = len(results)
                 lines = [
-                    f"# {params.folder} — {acct.get('display_name', params.account_id)}",
+                    f"# {params.folder} — {acct.get('display_name') or params.account_id}",
                     f"Showing {showing} of {total} messages (offset {params.offset})\n",
                     "| UID | From | Subject | Date |",
                     "|-----|------|---------|------|",
@@ -1467,7 +1535,7 @@ async def email_search_messages(params: SearchEmailsInput) -> str:
                     results.append(_summarise_msg(msg, uid))
 
                 lines = [
-                    f"# Search Results — {acct.get('display_name', params.account_id)}",
+                    f"# Search Results — {acct.get('display_name') or params.account_id}",
                     f"Query: `{params.query}` in {params.folder} ({len(results)} results)\n",
                     "| UID | From | Subject | Date |",
                     "|-----|------|---------|------|",
@@ -1873,7 +1941,7 @@ async def email_sieve_list(params: SieveListInput) -> str:
                 if not scripts:
                     return f"No Sieve scripts on {params.account_id}."
 
-                lines = [f"# Sieve Scripts — {acct.get('display_name', params.account_id)}\n"]
+                lines = [f"# Sieve Scripts — {acct.get('display_name') or params.account_id}\n"]
                 for name, active in scripts:
                     marker = " **(active)**" if active else ""
                     lines.append(f"- `{name}`{marker}")
@@ -2196,7 +2264,7 @@ async def cal_list_calendars(params: CalListCalendarsInput) -> str:
         calendars = principal.calendars()
         if not calendars:
             return f"No calendars found for {params.account_id}."
-        lines = [f"# Calendars — {acct.get('display_name', params.account_id)}\n"]
+        lines = [f"# Calendars — {acct.get('display_name') or params.account_id}\n"]
         for cal in calendars:
             name = cal.name or "(unnamed)"
             lines.append(f"- **{name}** — `{cal.url}`")
@@ -2249,7 +2317,7 @@ async def cal_list_events(params: CalListEventsInput) -> str:
 
         cal_name = cal.name or "(default)"
         lines = [
-            f"# Events — {cal_name} ({acct.get('display_name', params.account_id)})",
+            f"# Events — {cal_name} ({acct.get('display_name') or params.account_id})",
             f"{start.date()} to {end.date()} ({len(formatted)} events)\n",
             "| Start | End | Summary | Location |",
             "|-------|-----|---------|----------|",
@@ -2539,7 +2607,7 @@ async def card_list_addressbooks(params: CardListAddressBooksInput) -> str:
         books = await _carddav_propfind(acct)
         if not books:
             return f"No address books found for {params.account_id}."
-        lines = [f"# Address Books — {acct.get('display_name', params.account_id)}\n"]
+        lines = [f"# Address Books — {acct.get('display_name') or params.account_id}\n"]
         for b in books:
             lines.append(f"- **{b['name']}**")
         return "\n".join(lines)
