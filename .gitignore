@@ -9,3 +9,6 @@ htmlcov/
 accounts.json
 .venv/
 .env
+
+# fix-issue-team per-run artifacts (agents + RUNBOOK are committed; runs/ is scratch)
+.claude/agents/fix-issue-team/runs/
