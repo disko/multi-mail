@@ -16,7 +16,7 @@ Multi-Mail plugs Claude into the open mail-server stack you already run — IMAP
 
 | | |
 |---|---|
-| **31 MCP tools** | Email read/send/reply/forward/move, folder/Sieve management, calendar event CRUD, contact CRUD |
+| **32 MCP tools** | Email read/send/reply/forward/move/flag, folder/Sieve management, calendar event CRUD, contact CRUD |
 | **Autodiscovery** | Mozilla autoconfig, Microsoft/Mailcow Autodiscover, DNS SRV, and `.well-known` DAV — add an account by typing its email address |
 | **Multi-account** | Add and remove accounts at runtime; switch contexts per request |
 | **Sieve filters** | Manage server-side filtering rules via ManageSieve (RFC 5804) |
@@ -45,7 +45,7 @@ Multi-Mail plugs Claude into the open mail-server stack you already run — IMAP
    git clone https://github.com/disko/multi-mail.git ~/.plugins/multi-mail
    ```
 2. Install `uv` (same one-liner as above).
-3. Restart Claude Code. You'll see `/email-add-account`, `/email-remove-account`, and `/email-list-accounts` slash commands plus the 31 MCP tools.
+3. Restart Claude Code. You'll see `/email-add-account`, `/email-remove-account`, and `/email-list-accounts` slash commands plus the 32 MCP tools.
 
 Updating later: `git pull` then restart the client.
 
@@ -142,7 +142,7 @@ To report a vulnerability privately, see [SECURITY.md](SECURITY.md).
 ## MCP tool reference
 
 <details>
-<summary><b>Email (14 tools)</b></summary>
+<summary><b>Email (15 tools)</b></summary>
 
 | Tool | Description |
 |------|-------------|
@@ -160,6 +160,7 @@ To report a vulnerability privately, see [SECURITY.md](SECURITY.md).
 | `email_reply` | Reply or reply-all |
 | `email_forward` | Forward a message |
 | `email_move_message` | Move between folders |
+| `email_modify_flags` | Add or remove IMAP flags (\\Flagged, \\Seen, \\Answered, custom keywords) |
 </details>
 
 <details>
@@ -260,7 +261,7 @@ For deeper contributor notes, see [CLAUDE.md](CLAUDE.md).
 
 | Component | Description |
 |-----------|-------------|
-| **MCP Server** (`servers/email_mcp.py`) | Python/FastMCP server exposing 31 tools |
+| **MCP Server** (`servers/email_mcp.py`) | Python/FastMCP server exposing 32 tools |
 | **Security helpers** (`servers/_security.py`) | SSRF guard, TLS redirect hook, DAV host pinning |
 | **Workflow skill** (`skills/email-workflows/`) | Workflow guidance, IMAP search syntax cheatsheet, Sieve language reference |
 | **Slash commands** | `/email-add-account`, `/email-remove-account`, `/email-list-accounts` |

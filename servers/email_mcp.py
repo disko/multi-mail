@@ -44,7 +44,7 @@ import httpx
 import managesieve as ms
 import vobject
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from _security import resolve_dav_url, safe_async_client
 
@@ -549,6 +549,69 @@ class MoveEmailInput(AccountIdMixin):
     uid: str = Field(..., description="UID of the message to move", min_length=1)
     source_folder: str = Field(default="INBOX", description="Current folder")
     dest_folder: str = Field(..., description="Destination folder", min_length=1)
+
+
+# Characters that may not appear inside an IMAP flag atom (RFC 3501 §9
+# `atom-specials`). Whitespace, parens, brace literals, and the listed
+# control characters all break the wire protocol if sent verbatim.
+_FLAG_ATOM_FORBIDDEN = set(" \t\r\n()[]{}\"%*")
+
+
+def _validate_flag_atom(flag: str) -> str:
+    """Validate a single IMAP flag atom; return it unchanged or raise.
+
+    System flags start with ``\\`` (e.g. ``\\Flagged``, ``\\Seen``); custom
+    keywords are bare atoms (e.g. ``follow-up``). Both must be non-empty
+    and free of IMAP-disallowed characters.
+    """
+    if not isinstance(flag, str):
+        raise ValueError(f"invalid flag atom: {flag!r} is not a string")
+    if not flag:
+        raise ValueError("invalid flag atom: empty string")
+    if flag.startswith("\\") and len(flag) < 2:
+        raise ValueError(f"invalid flag atom: {flag!r} is a bare backslash")
+    bad = _FLAG_ATOM_FORBIDDEN.intersection(flag)
+    if bad:
+        raise ValueError(
+            f"invalid flag atom {flag!r}: contains disallowed character(s) "
+            f"{sorted(bad)!r} (whitespace, parens, braces, quotes, or wildcards)"
+        )
+    return flag
+
+
+class ModifyFlagsInput(AccountIdMixin):
+    """Input for adding and/or removing IMAP flags on a message.
+
+    Either or both of ``add_flags`` and ``remove_flags`` may be supplied;
+    at least one must be non-empty. Each entry must be a valid IMAP flag
+    atom (RFC 3501) — a system flag like ``\\Flagged`` / ``\\Seen`` /
+    ``\\Answered`` / ``\\Draft``, or a bare custom keyword like
+    ``follow-up``. The tool does NOT expunge: setting ``\\Deleted`` here
+    sticks until a later move/expunge.
+    """
+    uid: str = Field(..., description="UID of the message to modify", min_length=1)
+    folder: str = Field(default="INBOX", description="Folder containing the message")
+    add_flags: List[str] = Field(
+        default_factory=list,
+        description="Flags to set (e.g. ['\\\\Flagged', '\\\\Answered'])",
+    )
+    remove_flags: List[str] = Field(
+        default_factory=list,
+        description="Flags to clear (e.g. ['\\\\Flagged'])",
+    )
+
+    @field_validator("add_flags", "remove_flags")
+    @classmethod
+    def _validate_flag_atoms(cls, v: List[str]) -> List[str]:
+        return [_validate_flag_atom(f) for f in v]
+
+    @model_validator(mode="after")
+    def _require_at_least_one_flag(self) -> "ModifyFlagsInput":
+        if not self.add_flags and not self.remove_flags:
+            raise ValueError(
+                "at least one of add_flags or remove_flags must be non-empty"
+            )
+        return self
 
 
 class CreateFolderInput(AccountIdMixin):
@@ -1901,6 +1964,69 @@ async def email_move_message(params: MoveEmailInput) -> str:
                     pass
         except Exception as e:
             return f"Error moving message: {e}"
+    return await asyncio.to_thread(_impl)
+
+
+@mcp.tool(
+    name="email_modify_flags",
+    annotations={
+        "title": "Modify IMAP Message Flags",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def email_modify_flags(params: ModifyFlagsInput) -> str:
+    """Add and/or remove IMAP flags on a single message.
+
+    Maps to one or two ``UID STORE`` commands in a single IMAP session:
+    ``+FLAGS`` for adds (run first) then ``-FLAGS`` for removes. Accepts
+    system flags (``\\Flagged``, ``\\Seen``, ``\\Answered``, ``\\Draft``)
+    and bare custom keywords (``follow-up``). The tool does NOT expunge —
+    setting ``\\Deleted`` here will mark the message but leave it in
+    place; use ``email_move_message`` for the move-and-delete workflow.
+
+    Args:
+        params: account_id, uid, folder (default INBOX), add_flags,
+            remove_flags. At least one of the flag lists must be
+            non-empty.
+
+    Returns:
+        Confirmation message naming the UID, folder, and applied flag
+        deltas, or an ``Error: …`` string on failure.
+    """
+    def _impl():
+        try:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
+            try:
+                conn.select(params.folder)
+                # Adds first, then removes — order pinned by tests and
+                # documented for callers. A single tool invocation can
+                # carry both deltas; the IMAP wire format puts each
+                # group in its own STORE call.
+                if params.add_flags:
+                    flags = "(" + " ".join(params.add_flags) + ")"
+                    status, data = conn.uid("STORE", params.uid, "+FLAGS", flags)
+                    if status != "OK":
+                        return f"Error updating flags: {data}"
+                if params.remove_flags:
+                    flags = "(" + " ".join(params.remove_flags) + ")"
+                    status, data = conn.uid("STORE", params.uid, "-FLAGS", flags)
+                    if status != "OK":
+                        return f"Error updating flags: {data}"
+                return (
+                    f"Flags updated on UID {params.uid} in {params.folder}: "
+                    f"+{params.add_flags} -{params.remove_flags}"
+                )
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error updating flags: {e}"
     return await asyncio.to_thread(_impl)
 
 

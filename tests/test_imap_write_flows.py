@@ -372,3 +372,211 @@ def test_forward_does_not_double_fwd_prefix(stub_account, monkeypatch, fake_smtp
     _, _, wire = fake_smtp.sendmail_calls[0]
     assert "Subject: Fwd: status" in wire
     assert "Fwd: Fwd:" not in wire
+
+
+# ---------------------------------------------------------------------------
+# email_modify_flags — issue #3
+#
+# New tool: maps to UID STORE +FLAGS / -FLAGS. The tests below pin the
+# wire-format contract: a single IMAP session selects the folder, issues
+# adds first then removes (each as one parenthesised flag-list), and always
+# logs out. No expunge, no FETCH read-back, no UIDPLUS branch. The
+# `_FakeIMAP.stores` recorder above captures the (uid, flags_arg, value)
+# tuple shape that the new tool must produce.
+# ---------------------------------------------------------------------------
+
+def test_modify_flags_add_only_issues_plus_store(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="42", add_flags=["\\Flagged"],
+        )
+    ))
+
+    assert imap.selected == ("INBOX", False)
+    assert imap.stores == [("42", "+FLAGS", "(\\Flagged)")]
+    assert "42" in result
+    assert imap.logged_out is True
+
+
+def test_modify_flags_remove_only_issues_minus_store(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="42", remove_flags=["\\Flagged"],
+        )
+    ))
+
+    assert imap.selected == ("INBOX", False)
+    assert imap.stores == [("42", "-FLAGS", "(\\Flagged)")]
+    assert "42" in result
+    assert imap.logged_out is True
+
+
+def test_modify_flags_add_and_remove_in_one_call(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="7",
+            add_flags=["\\Answered"],
+            remove_flags=["\\Flagged", "\\Seen"],
+        )
+    ))
+
+    # Adds must precede removes — contract pinned here so callers
+    # (and the implementer) can rely on a deterministic order.
+    assert imap.stores == [
+        ("7", "+FLAGS", "(\\Answered)"),
+        ("7", "-FLAGS", "(\\Flagged \\Seen)"),
+    ]
+
+
+def test_modify_flags_idempotent_reapply(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    r1 = run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="42", add_flags=["\\Flagged"],
+        )
+    ))
+    r2 = run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="42", add_flags=["\\Flagged"],
+        )
+    ))
+
+    # Both calls reach STORE with no pre-fetch / current-flags lookup.
+    assert imap.stores == [
+        ("42", "+FLAGS", "(\\Flagged)"),
+        ("42", "+FLAGS", "(\\Flagged)"),
+    ]
+    assert r1 == r2  # same input → same output
+
+
+def test_modify_flags_respects_folder_argument(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="3",
+            folder="Archive", add_flags=["\\Flagged"],
+        )
+    ))
+
+    assert imap.selected == ("Archive", False)
+
+
+def test_modify_flags_custom_keyword_passes_through_unprefixed(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="9", add_flags=["follow-up"],
+        )
+    ))
+
+    assert imap.stores == [("9", "+FLAGS", "(follow-up)")]
+
+
+def test_modify_flags_rejects_empty_payload(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    # Both lists empty (Pydantic defaults). The model_validator or the
+    # _impl runtime check must reject this before issuing STORE.
+    from pydantic import ValidationError
+
+    try:
+        result = run(email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(account_id=ACCT_ID, uid="1")
+        ))
+    except ValidationError as e:
+        # Pydantic ValidationError path — empty payload rejected at
+        # model construction time.
+        msg = str(e).lower()
+        assert "at least one" in msg or "nothing to do" in msg or "non-empty" in msg
+    else:
+        # Runtime-check path — tool returns an error string.
+        low = result.lower()
+        assert "at least one" in low or "nothing to do" in low or (
+            "error" in low and "flag" in low
+        )
+
+    assert imap.stores == []
+
+
+def test_modify_flags_rejects_invalid_flag_atom(stub_account, monkeypatch):
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    # Whitespace inside a flag atom is illegal per RFC 3501 atom rules.
+    # The implementer can enforce this via Pydantic ValidationError
+    # (raised at construction) or via a runtime check in _impl that
+    # returns an error string. Either way: no STORE call, no crash.
+    from pydantic import ValidationError
+
+    def _attempt():
+        return run(email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID, uid="1",
+                add_flags=["bad flag with spaces"],
+            )
+        ))
+
+    try:
+        result = _attempt()
+    except ValidationError as e:
+        msg = str(e).lower()
+        assert "invalid" in msg or "whitespace" in msg or "atom" in msg
+    else:
+        low = result.lower()
+        assert "invalid" in low or "error" in low
+
+    assert imap.stores == []
+
+
+def test_modify_flags_handles_imap_store_failure(stub_account, monkeypatch):
+    class _DenyingIMAP(_FakeIMAP):
+        def uid(self, cmd, *args):
+            if cmd == "STORE":
+                # Record so the test can confirm the call was attempted.
+                self.stores.append(args)
+                return ("NO", [b"PERMISSION DENIED"])
+            return super().uid(cmd, *args)
+
+    imap = _DenyingIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="1", add_flags=["\\Flagged"],
+        )
+    ))
+
+    assert result.lower().startswith("error")
+    assert "PERMISSION DENIED" in result or "permission denied" in result.lower()
+    assert imap.logged_out is True
+
+
+def test_modify_flags_unknown_account_returns_error(monkeypatch):
+    def _missing(aid):
+        raise ValueError(f"Account '{aid}' not found. Use email_list_accounts.")
+    monkeypatch.setattr(email_mcp, "_get_account", _missing)
+
+    result = run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id="nope", uid="1", add_flags=["\\Flagged"],
+        )
+    ))
+
+    assert result.lower().startswith("error")
+    assert "not found" in result.lower()
