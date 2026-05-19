@@ -30,6 +30,10 @@ For each root cause the investigator identified:
    - The fixture shape (which `_FakeIMAP` / `_FakeClient` / etc. — re-use
      existing fakes; do not introduce httpx-mock or new libraries).
    - The exact assertion.
+   - **For invariant tests across multiple tools** (e.g. "no `None` in any
+     heading"), check each tool for short-circuit branches that bypass the
+     line under test (empty-list "Nothing found" returns are common). Stubs
+     must return at least one item so the rendering path executes.
 2. Decide **what code change** makes it pass. Specify:
    - File + line range.
    - Replacement strategy in 1-2 sentences (don't write the code yet).

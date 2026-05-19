@@ -80,6 +80,10 @@ so the orchestrator can show the user a checkpoint at each step.
   `bytes` and `tuple`.
 - Modified UTF-7 mailbox names (RFC 3501 §5.1.3) are out of scope for the
   list parser; if a user reports Unicode garble, that's a separate fix.
+- **Bare `try/except` fallbacks that never fire mask bugs, don't fix them.**
+  The old folders parser had `try: rsplit(...) except IndexError: split()` —
+  the except branch was dead code for the failing input. When investigating
+  a parser bug, confirm which branch actually executes.
 
 ## Agent invocation contract
 
