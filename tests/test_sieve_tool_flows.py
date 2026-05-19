@@ -286,3 +286,109 @@ def test_rename_missing_source_returns_error(fake):
         account_id=ACCT_ID, old_name="ghost", new_name="new",
     )))
     assert "Could not retrieve script 'ghost'" in result
+
+
+# ---------------------------------------------------------------------------
+# Outer-except tail sweep (coverage iter-4, issue #8)
+#
+# Every sieve tool wraps its body in ``try: ... except Exception as e:
+# return f"Error: {e}"``. The happy-path tests above exercise the inner
+# try; these tests inject a raising ``_sieve_connect`` so the outer except
+# fires.
+# ---------------------------------------------------------------------------
+
+
+def _raising_sieve(monkeypatch, exc):
+    """Override _sieve_connect to raise ``exc`` on the next call."""
+    def boom(acct):
+        raise exc
+    monkeypatch.setattr(email_mcp, "_sieve_connect", boom)
+
+
+def test_sieve_list_outer_except_returns_error(fake, monkeypatch):
+    _raising_sieve(monkeypatch, RuntimeError("sieve unreachable"))
+    result = run(email_mcp.email_sieve_list(email_mcp.SieveListInput(account_id=ACCT_ID)))
+    assert result.startswith("Error:")
+    assert "sieve unreachable" in result
+
+
+def test_sieve_get_outer_except_returns_error(fake, monkeypatch):
+    _raising_sieve(monkeypatch, RuntimeError("sieve get boom"))
+    result = run(email_mcp.email_sieve_get(email_mcp.SieveGetInput(
+        account_id=ACCT_ID, script_name="anything",
+    )))
+    assert result.startswith("Error:")
+    assert "sieve get boom" in result
+
+
+def test_sieve_put_outer_except_returns_error(fake, monkeypatch):
+    _raising_sieve(monkeypatch, RuntimeError("put boom"))
+    result = run(email_mcp.email_sieve_put(email_mcp.SievePutInput(
+        account_id=ACCT_ID, script_name="x", script_content="# noop", activate=False,
+    )))
+    assert result.startswith("Error:")
+    assert "put boom" in result
+
+
+def test_sieve_activate_outer_except_returns_error(fake, monkeypatch):
+    _raising_sieve(monkeypatch, RuntimeError("activate boom"))
+    result = run(email_mcp.email_sieve_activate(email_mcp.SieveActivateInput(
+        account_id=ACCT_ID, script_name="x",
+    )))
+    assert result.startswith("Error:")
+    assert "activate boom" in result
+
+
+def test_sieve_activate_inner_setactive_failure_surfaces(fake):
+    """Inner arm: setactive returns non-OK → ``Error activating script: <code>``."""
+    fake.scripts = {"a": "..."}
+    fake.next_error["setactive"] = "NO server busy"
+    result = run(email_mcp.email_sieve_activate(email_mcp.SieveActivateInput(
+        account_id=ACCT_ID, script_name="a",
+    )))
+    assert "Error activating script" in result
+    assert "NO server busy" in result
+
+
+def test_sieve_delete_outer_except_returns_error(fake, monkeypatch):
+    _raising_sieve(monkeypatch, RuntimeError("delete boom"))
+    result = run(email_mcp.email_sieve_delete(email_mcp.SieveDeleteInput(
+        account_id=ACCT_ID, script_name="x",
+    )))
+    assert result.startswith("Error:")
+    assert "delete boom" in result
+
+
+def test_sieve_rename_outer_except_returns_error(fake, monkeypatch):
+    _raising_sieve(monkeypatch, RuntimeError("rename boom"))
+    result = run(email_mcp.email_sieve_rename(email_mcp.SieveRenameInput(
+        account_id=ACCT_ID, old_name="old", new_name="new",
+    )))
+    assert result.startswith("Error:")
+    assert "rename boom" in result
+
+
+def test_sieve_rename_putscript_failure_short_circuits(fake):
+    """Inner arm: putscript fails → ``Error uploading script with new name: …``."""
+    fake.scripts = {"old": "content"}
+    fake.next_error["putscript"] = "NO syntax"
+    result = run(email_mcp.email_sieve_rename(email_mcp.SieveRenameInput(
+        account_id=ACCT_ID, old_name="old", new_name="new",
+    )))
+    assert "Error uploading script with new name" in result
+    assert "NO syntax" in result
+    assert "new" not in fake.scripts
+
+
+def test_sieve_rename_deletescript_failure_surfaces_partial(fake):
+    """Inner arm: putscript ok but deletescript fails → partial-failure message."""
+    fake.scripts = {"old": "content"}
+    # Old is NOT active, so deletescript runs without the active-script gate.
+    fake.next_error["deletescript"] = "NO cant delete"
+    result = run(email_mcp.email_sieve_rename(email_mcp.SieveRenameInput(
+        account_id=ACCT_ID, old_name="old", new_name="new",
+    )))
+    assert "could not " in result.lower()
+    assert "old" in result  # old name surfaces in the partial-failure string
+    assert "new" in fake.scripts  # new script WAS uploaded
+    assert "NO cant delete" in result
