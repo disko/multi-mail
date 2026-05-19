@@ -323,3 +323,26 @@ def test_autodiscover_tool_omits_dav_and_smtp_blocks_when_only_imap_discovered(m
     assert "## CalDAV" not in out
     assert "## CardDAV" not in out
     assert "(default)" in out
+
+
+# ---------------------------------------------------------------------------
+# Formatter — imap-block skipped when no imap_host (#8 iter-7)
+# ---------------------------------------------------------------------------
+
+
+def test_autodiscover_tool_omits_imap_block_when_only_smtp_discovered(monkeypatch):
+    """A discovery result with smtp_host but no imap_host → the
+    ``if result.get("imap_host"):`` arm is False, the IMAP block is skipped
+    while the SMTP block still renders. Pins partial 1306->1313."""
+    _stub_autodiscover(monkeypatch, {
+        "sources": ["dns-srv"],
+        "smtp_host": "smtp.example.com",
+        "smtp_port": 587,
+        "smtp_security": "starttls",
+    })
+    out = run(email_mcp.email_autodiscover(
+        email_mcp.AutodiscoverInput(email_address="alice@example.com")
+    ))
+    assert "## IMAP" not in out
+    assert "## SMTP (Outgoing)" in out
+    assert "smtp.example.com" in out

@@ -472,3 +472,27 @@ def test_sieve_rename_swallows_logout_exception(fake):
     ))
     assert "renamed" in result.lower()
     assert not result.startswith("Error:")
+
+
+# ---------------------------------------------------------------------------
+# email_sieve_rename — listscripts NO short-circuits was_active (#8 iter-7)
+# ---------------------------------------------------------------------------
+
+
+def test_sieve_rename_with_listscripts_failure_treats_old_as_inactive(fake):
+    """When ``listscripts`` returns NO, ``was_active`` stays False, so the
+    rename proceeds without calling ``setactive``. Pins partial 2542->2549
+    (the `if list_result == "OK":` false-arm jumping to the getscript call).
+    """
+    fake.scripts = {"old": "# script content"}
+    fake.next_error["listscripts"] = "NO"
+
+    result = run(email_mcp.email_sieve_rename(email_mcp.SieveRenameInput(
+        account_id=ACCT_ID, old_name="old", new_name="renamed",
+    )))
+    assert "renamed" in result.lower()
+    # was_active stayed False → setactive was never called → no active script.
+    assert fake.active is None
+    # The old script has been deleted, the new one is in place.
+    assert "old" not in fake.scripts
+    assert "renamed" in fake.scripts

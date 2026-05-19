@@ -391,3 +391,133 @@ def test_wellknown_dav_propfind_redirect_uses_location_header(monkeypatch):
     out = run(email_mcp._try_wellknown_dav("example.com"))
     assert out is not None
     assert out["caldav_url"] == redirected
+
+
+# ---------------------------------------------------------------------------
+# Final coverage gaps — DNS SRV malformed lines, subprocess failure,
+# well-known DAV PROPFIND/GET exception swallows, and redirect-skip
+# (#8 iter-7).
+# ---------------------------------------------------------------------------
+
+
+def test_dns_srv_skips_dig_output_with_fewer_than_four_fields(monkeypatch):
+    """dig returns a line with only 3 fields → ``len(parts) >= 4`` is False,
+    loop continues without populating. The fallback variant (port 143)
+    still wins. Pins partial 1156->1134."""
+    _install_dig(monkeypatch, {
+        "_imaps._tcp.example.com": "0 1 993",  # missing target field
+        "_imap._tcp.example.com": "0 1 143 imap.example.com.",
+    })
+    out = run(email_mcp._try_dns_srv("example.com"))
+    assert out is not None
+    assert out["imap_host"] == "imap.example.com"
+    # The malformed _imaps line was discarded; we fell through to _imap.
+    assert out["imap_port"] == 143
+    assert out["imap_security"] == "starttls"
+
+
+def test_dns_srv_swallows_subprocess_exception(monkeypatch):
+    """``asyncio.create_subprocess_exec`` itself raises → except: continue.
+    Pins lines 1163-1164."""
+    async def _boom(*args, **kwargs):
+        raise OSError("dig binary missing")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
+
+    import socket as _socket
+
+    def _gaierror(*args, **kwargs):
+        raise _socket.gaierror("nx")
+
+    monkeypatch.setattr(_socket, "getaddrinfo", _gaierror)
+
+    # All four SRV queries fail → no host populated → returns None.
+    assert run(email_mcp._try_dns_srv("nowhere.example")) is None
+
+
+def test_wellknown_dav_propfind_exception_skips_get_fallback(monkeypatch):
+    """PROPFIND for the caldav URL raises → except: continue skips both the
+    success arms AND the GET fallback for that URL. The carddav URL still
+    succeeds. Pins lines 1192-1193."""
+    caldav_url = "https://example.com/.well-known/caldav"
+    carddav_url = "https://example.com/.well-known/carddav"
+    client = _FakeAsyncClient(
+        request={
+            ("PROPFIND", carddav_url): _FakeResp(status_code=207, url=carddav_url),
+        },
+        raise_on={caldav_url},
+    )
+    _install_client(monkeypatch, client)
+    out = run(email_mcp._try_wellknown_dav("example.com"))
+    assert out is not None
+    assert out["carddav_url"] == carddav_url
+    assert "caldav_url" not in out
+    # The GET fallback for caldav was NOT attempted (the except skipped it).
+    assert ("GET", caldav_url) not in client.calls
+
+
+def test_wellknown_dav_get_fallback_exception_continues(monkeypatch):
+    """PROPFIND returns 404 (no key populated) → falls into the GET
+    fallback try; the GET call raises → except: continue. No key set on
+    either URL, function returns None. Pins lines 1201-1202."""
+    caldav_url = "https://example.com/.well-known/caldav"
+    carddav_url = "https://example.com/.well-known/carddav"
+
+    # We need PROPFIND to return 404 (NOT raise) and GET to raise. The
+    # shared ``raise_on`` set keys by URL only and is checked in both
+    # methods, so a subclass narrows the raise to GET only.
+    class _GetOnlyRaisingClient(_FakeAsyncClient):
+        async def get(self, url, **kwargs):
+            self.calls.append(("GET", url))
+            raise RuntimeError("get-side network down")
+
+    client = _GetOnlyRaisingClient(request={})  # PROPFIND → 404 default
+    _install_client(monkeypatch, client)
+
+    out = run(email_mcp._try_wellknown_dav("example.com"))
+    assert out is None
+    # GET fallback was attempted for both URLs (PROPFIND returned 404 → no
+    # key set → into the GET branch → GET raised).
+    assert ("GET", caldav_url) in client.calls
+    assert ("GET", carddav_url) in client.calls
+
+
+def test_wellknown_dav_redirect_with_location_skips_get_fallback(monkeypatch):
+    """A 302 response with a ``Location`` header populates the URL key →
+    the post-except `if key not in result:` arm is False → GET fallback is
+    skipped for that URL."""
+    caldav_url = "https://example.com/.well-known/caldav"
+    redirected = "https://dav.example.com/cal/"
+    client = _FakeAsyncClient(request={
+        ("PROPFIND", caldav_url): _FakeResp(
+            status_code=302, url=caldav_url,
+            headers={"location": redirected},
+        ),
+    })
+    _install_client(monkeypatch, client)
+    out = run(email_mcp._try_wellknown_dav("example.com"))
+    assert out is not None
+    assert out["caldav_url"] == redirected
+    # GET was NOT called for caldav (PROPFIND already populated the key).
+    assert ("GET", caldav_url) not in client.calls
+
+
+def test_wellknown_dav_redirect_without_location_falls_to_get(monkeypatch):
+    """A 301/302 PROPFIND response WITHOUT a ``Location`` header → the
+    `if loc:` arm is False → key stays unset → GET fallback fires. Pins
+    partial 1190->1194 (the `if loc:` false branch jumping past the
+    populate-result line through the except into the GET-fallback check).
+    """
+    caldav_url = "https://example.com/.well-known/caldav"
+    client = _FakeAsyncClient(request={
+        # 301 with no `location` header in the response.
+        ("PROPFIND", caldav_url): _FakeResp(
+            status_code=301, url=caldav_url, headers={},
+        ),
+    })
+    _install_client(monkeypatch, client)
+    out = run(email_mcp._try_wellknown_dav("example.com"))
+    # PROPFIND fell through (no location), GET fallback got 404 default.
+    assert out is None
+    # GET was attempted for caldav (key not in result triggered the
+    # fallback).
+    assert ("GET", caldav_url) in client.calls

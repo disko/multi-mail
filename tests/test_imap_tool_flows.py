@@ -561,3 +561,27 @@ def test_read_message_with_cc_renders_cc_line(stub_account, monkeypatch):
         email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="8", folder="INBOX")
     ))
     assert "**CC**: cc@example.com" in result
+
+
+# ---------------------------------------------------------------------------
+# Mixed valid / unparseable LIST items (#8 iter-7)
+# ---------------------------------------------------------------------------
+
+
+def test_list_folders_drops_items_that_parse_to_none(stub_account, monkeypatch):
+    """A LIST response containing one valid item and one unparseable one →
+    valid item shows up, the unparseable item is silently dropped (no
+    error, no garbage folder entry). Pins partial 1466->1464 (the
+    `if name:` false-arm — name is None so the append is skipped)."""
+    fake = _FakeIMAP(list_resp=[
+        b'(\\HasNoChildren) "/" "INBOX"',
+        b'(unbalanced',  # _parse_imap_list_line returns None
+    ])
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_list_folders(
+        email_mcp.ListFoldersInput(account_id=ACCT_ID)
+    ))
+    assert "- INBOX" in result
+    # Exactly one folder line — the unparseable item was dropped.
+    folder_lines = [ln for ln in result.splitlines() if ln.startswith("- ")]
+    assert len(folder_lines) == 1
