@@ -2029,8 +2029,8 @@ async def email_move_message(params: MoveEmailInput) -> str:
                 # UID, not every \Deleted message in the folder. If the
                 # server doesn't advertise UIDPLUS, refuse rather than risk
                 # destroying the user's other \Deleted messages.
-                caps = b" ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else b""
-                if b"UIDPLUS" in caps:
+                caps = " ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else ""
+                if "UIDPLUS" in caps:
                     conn.uid("EXPUNGE", params.uid)
                 else:
                     # Clear the \Deleted flag so a later untargeted
@@ -2096,8 +2096,8 @@ async def email_delete_message(params: DeleteEmailInput) -> str:
             conn = _imap_connect(acct)
             try:
                 conn.select(params.folder)
-                caps = b" ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else b""
-                uidplus = b"UIDPLUS" in caps
+                caps = " ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else ""
+                uidplus = "UIDPLUS" in caps
                 if params.permanent:
                     # STORE \Deleted, then UID EXPUNGE (gated by UIDPLUS).
                     conn.uid("STORE", params.uid, "+FLAGS", "(\\Deleted)")
@@ -2178,9 +2178,9 @@ async def email_expunge(params: ExpungeInput) -> str:
             conn = _imap_connect(acct)
             try:
                 conn.select(params.folder)
-                caps = b" ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else b""
+                caps = " ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else ""
                 if params.uid:
-                    if b"UIDPLUS" not in caps:
+                    if "UIDPLUS" not in caps:
                         return (
                             f"Error: server does not advertise UIDPLUS capability; "
                             f"refusing to issue an untargeted EXPUNGE. UID "

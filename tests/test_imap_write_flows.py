@@ -60,7 +60,7 @@ def _msg_bytes(*, frm="alice@example.com", to="me@example.com",
 
 
 class _FakeIMAP:
-    def __init__(self, *, fetch_bodies=None, capabilities=(b"IMAP4REV1", b"UIDPLUS"),
+    def __init__(self, *, fetch_bodies=None, capabilities=("IMAP4REV1", "UIDPLUS"),
                  list_resp=None):
         self.fetch_bodies = fetch_bodies or {}
         self.capabilities = capabilities
@@ -243,7 +243,7 @@ def test_delete_folder_forwards_name_to_imap(stub_account, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_move_uses_uid_expunge_when_uidplus_supported(stub_account, monkeypatch):
-    imap = _FakeIMAP(capabilities=(b"IMAP4REV1", b"UIDPLUS"))
+    imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))
     _install_imap(monkeypatch, imap)
 
     result = run(email_mcp.email_move_message(
@@ -261,7 +261,7 @@ def test_move_uses_uid_expunge_when_uidplus_supported(stub_account, monkeypatch)
 def test_move_refuses_and_clears_deleted_when_no_uidplus(stub_account, monkeypatch):
     """Without UIDPLUS, a bare EXPUNGE would wipe every \\Deleted message in
     the source folder. The fix is to refuse and roll back the \\Deleted flag."""
-    imap = _FakeIMAP(capabilities=(b"IMAP4REV1",))  # no UIDPLUS
+    imap = _FakeIMAP(capabilities=("IMAP4REV1",))  # no UIDPLUS
     _install_imap(monkeypatch, imap)
 
     result = run(email_mcp.email_move_message(
@@ -768,7 +768,7 @@ def test_delete_message_permanent_skips_copy_and_uses_uid_expunge(
     stub_account, monkeypatch
 ):
     """``permanent=True`` does not COPY; STORE \\Deleted + UID EXPUNGE only."""
-    imap = _FakeIMAP(capabilities=(b"IMAP4REV1", b"UIDPLUS"))
+    imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))
     _install_imap(monkeypatch, imap)
 
     result = run(email_mcp.email_delete_message(
@@ -790,7 +790,7 @@ def test_delete_message_permanent_refuses_and_clears_deleted_without_uidplus(
     stub_account, monkeypatch
 ):
     """Without UIDPLUS, refuse and roll back the \\Deleted flag."""
-    imap = _FakeIMAP(capabilities=(b"IMAP4REV1",))  # no UIDPLUS
+    imap = _FakeIMAP(capabilities=("IMAP4REV1",))  # no UIDPLUS
     _install_imap(monkeypatch, imap)
 
     result = run(email_mcp.email_delete_message(
@@ -951,7 +951,7 @@ def test_expunge_bare_with_confirm_flag_calls_expunge(stub_account, monkeypatch)
 
 def test_expunge_with_uid_refuses_when_no_uidplus(stub_account, monkeypatch):
     """uid supplied but server lacks UIDPLUS → refuse, do not bare-expunge."""
-    imap = _FakeIMAP(capabilities=(b"IMAP4REV1",))
+    imap = _FakeIMAP(capabilities=("IMAP4REV1",))
     _install_imap(monkeypatch, imap)
 
     result = run(email_mcp.email_expunge(
@@ -1174,7 +1174,7 @@ def test_delete_folder_returns_error_on_non_ok_status(stub_account, monkeypatch)
 
 
 def test_move_message_returns_error_when_copy_fails(stub_account, monkeypatch):
-    imap = _FakeIMAP(capabilities=(b"IMAP4REV1", b"UIDPLUS"))
+    imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))
     orig_uid = imap.uid
 
     def _bad_uid(cmd, *args):
@@ -1197,7 +1197,7 @@ def test_move_message_returns_error_when_copy_fails(stub_account, monkeypatch):
 
 
 def test_delete_message_move_to_trash_refuses_without_uidplus(stub_account, monkeypatch):
-    imap = _FakeIMAP(capabilities=(b"IMAP4REV1",))  # no UIDPLUS
+    imap = _FakeIMAP(capabilities=("IMAP4REV1",))  # no UIDPLUS
     _install_imap(monkeypatch, imap)
 
     result = run(email_mcp.email_delete_message(
@@ -1263,7 +1263,7 @@ def test_resolve_trash_special_use_from_tuple_list_item():
     """LIST entry returned as imaplib literal-form tuple is scanned for the
     ``\\Trash`` flag too. Pins the `elif isinstance(item, tuple)` branch."""
     class _TupleListIMAP:
-        capabilities = (b"IMAP4REV1",)
+        capabilities = ("IMAP4REV1",)
 
         def list(self, *args, **kwargs):
             # Literal-form tuple: (header_bytes_with_flags, mailbox_name_bytes)
@@ -1489,6 +1489,80 @@ def test_send_message_sent_folder_loop_exhausts_without_append(
     assert len(smtp.sendmail_calls) == 1
     # No append happened — every candidate select returned NO.
     assert imap.appended == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #20 regression — b" ".join(capabilities) TypeError with real imaplib
+#
+# Real imaplib stores conn.capabilities as a str-tuple, not bytes.  The three
+# sites that called ``b" ".join(conn.capabilities)`` therefore raised
+# ``TypeError: sequence item 0: expected a bytes-like object, str found``,
+# which the outer ``except Exception as e`` converted to an "Error …" string.
+# These three tests use the real imaplib contract (str tuple) and assert the
+# happy-path success response, so they fail red until the fix lands.
+# ---------------------------------------------------------------------------
+
+
+def test_move_uses_uid_expunge_with_str_capabilities(stub_account, monkeypatch):
+    """email_move_message with real-imaplib str-tuple capabilities succeeds.
+
+    The old code called ``b" ".join(conn.capabilities)``; real imaplib gives a
+    str-tuple so that raised TypeError.  After the fix, ``" ".join(...)`` works
+    and the tool follows the UIDPLUS path: COPY + UID STORE + UID EXPUNGE.
+    """
+    imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))  # str, not bytes
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_move_message(
+        email_mcp.MoveEmailInput(
+            account_id=ACCT_ID, uid="42",
+            source_folder="INBOX", dest_folder="Archive",
+        )
+    ))
+
+    assert imap.uid_expunges == ["42"]
+    assert "moved" in result.lower()
+    assert not result.startswith("Error")
+
+
+def test_delete_message_permanent_with_str_capabilities(stub_account, monkeypatch):
+    """email_delete_message(permanent=True) with str-tuple capabilities succeeds.
+
+    Same bytes/str mismatch as the move tool.  After the fix the UIDPLUS branch
+    is taken: no COPY, STORE \\Deleted, then UID EXPUNGE.
+    """
+    imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))  # str, not bytes
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX", permanent=True,
+        )
+    ))
+
+    assert imap.uid_expunges == ["42"]
+    assert imap.copied == []
+    low = result.lower()
+    assert "permanent" in low or "permanently" in low
+    assert not result.startswith("Error")
+
+
+def test_expunge_with_uid_uses_str_capabilities(stub_account, monkeypatch):
+    """email_expunge(uid=...) with str-tuple capabilities succeeds.
+
+    Third site with the bytes/str join bug.  After the fix the UIDPLUS branch
+    is taken and the scoped UID EXPUNGE fires.
+    """
+    imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))  # str, not bytes
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_expunge(
+        email_mcp.ExpungeInput(account_id=ACCT_ID, uid="42", folder="INBOX")
+    ))
+
+    assert imap.uid_expunges == ["42"]
+    assert "42" in result and "INBOX" in result
+    assert not result.startswith("Error")
 
 
 def test_reply_to_message_without_message_id_skips_references_update(
