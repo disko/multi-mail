@@ -16,7 +16,7 @@ Multi-Mail plugs Claude into the open mail-server stack you already run — IMAP
 
 | | |
 |---|---|
-| **32 MCP tools** | Email read/send/reply/forward/move/flag, folder/Sieve management, calendar event CRUD, contact CRUD |
+| **34 MCP tools** | Email read/send/reply/forward/move/flag, folder/Sieve management, calendar event CRUD, contact CRUD |
 | **Autodiscovery** | Mozilla autoconfig, Microsoft/Mailcow Autodiscover, DNS SRV, and `.well-known` DAV — add an account by typing its email address |
 | **Multi-account** | Add and remove accounts at runtime; switch contexts per request |
 | **Sieve filters** | Manage server-side filtering rules via ManageSieve (RFC 5804) |
@@ -45,7 +45,7 @@ Multi-Mail plugs Claude into the open mail-server stack you already run — IMAP
    git clone https://github.com/disko/multi-mail.git ~/.plugins/multi-mail
    ```
 2. Install `uv` (same one-liner as above).
-3. Restart Claude Code. You'll see `/email-add-account`, `/email-remove-account`, and `/email-list-accounts` slash commands plus the 32 MCP tools.
+3. Restart Claude Code. You'll see `/email-add-account`, `/email-remove-account`, and `/email-list-accounts` slash commands plus the 34 MCP tools.
 
 Updating later: `git pull` then restart the client.
 
@@ -69,6 +69,7 @@ Once you've added at least one account:
 | *"Search for emails from alice about the invoice"* | IMAP SEARCH `FROM "alice" SUBJECT "invoice"` |
 | *"Reply to that and say I'll be there"* | `email_reply` with threading headers |
 | *"Forward this to the team"* | `email_forward` with notes |
+| *"Move that to trash"* / *"Delete that for good"* | `email_delete_message` (Trash by default; `permanent=True` to expunge) |
 | *"Create a folder called Archive/2026"* | `email_create_folder` |
 | *"Show me my Sieve filters"* / *"Set up a vacation auto-reply"* | `email_sieve_*` |
 | *"What's on my calendar this week?"* | `cal_list_events` with a date window |
@@ -142,7 +143,7 @@ To report a vulnerability privately, see [SECURITY.md](SECURITY.md).
 ## MCP tool reference
 
 <details>
-<summary><b>Email (15 tools)</b></summary>
+<summary><b>Email (17 tools)</b></summary>
 
 | Tool | Description |
 |------|-------------|
@@ -161,6 +162,8 @@ To report a vulnerability privately, see [SECURITY.md](SECURITY.md).
 | `email_forward` | Forward a message |
 | `email_move_message` | Move between folders |
 | `email_modify_flags` | Add or remove IMAP flags (\\Flagged, \\Seen, \\Answered, custom keywords) |
+| `email_delete_message` | Delete a message (Trash by default, or permanent with UIDPLUS-scoped EXPUNGE) |
+| `email_expunge` | Expunge \\Deleted messages (UID-scoped or bare with explicit confirmation) |
 </details>
 
 <details>
@@ -261,7 +264,7 @@ For deeper contributor notes, see [CLAUDE.md](CLAUDE.md).
 
 | Component | Description |
 |-----------|-------------|
-| **MCP Server** (`servers/email_mcp.py`) | Python/FastMCP server exposing 32 tools |
+| **MCP Server** (`servers/email_mcp.py`) | Python/FastMCP server exposing 34 tools |
 | **Security helpers** (`servers/_security.py`) | SSRF guard, TLS redirect hook, DAV host pinning |
 | **Workflow skill** (`skills/email-workflows/`) | Workflow guidance, IMAP search syntax cheatsheet, Sieve language reference |
 | **Slash commands** | `/email-add-account`, `/email-remove-account`, `/email-list-accounts` |

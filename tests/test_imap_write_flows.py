@@ -60,7 +60,8 @@ def _msg_bytes(*, frm="alice@example.com", to="me@example.com",
 
 
 class _FakeIMAP:
-    def __init__(self, *, fetch_bodies=None, capabilities=(b"IMAP4REV1", b"UIDPLUS")):
+    def __init__(self, *, fetch_bodies=None, capabilities=(b"IMAP4REV1", b"UIDPLUS"),
+                 list_resp=None):
         self.fetch_bodies = fetch_bodies or {}
         self.capabilities = capabilities
         self.selected = None
@@ -71,10 +72,19 @@ class _FakeIMAP:
         self.uid_expunges = []  # [uid]
         self.bare_expunged = False
         self.logged_out = False
+        # RFC 6154 SPECIAL-USE LIST response; default advertises \Trash on "Trash".
+        self.list_resp = list_resp if list_resp is not None else [
+            b'(\\HasNoChildren) "/" "INBOX"',
+            b'(\\HasNoChildren \\Trash) "/" "Trash"',
+            b'(\\HasNoChildren \\Sent) "/" "Sent"',
+        ]
 
     def select(self, folder, readonly=False):
         self.selected = (folder, readonly)
         return ("OK", [b""])
+
+    def list(self, directory='""', pattern='"*"'):
+        return ("OK", list(self.list_resp))
 
     def create(self, folder):
         self.created.append(folder)
@@ -654,3 +664,362 @@ def test_validate_flag_atom_rejects_empty_string():
 def test_validate_flag_atom_rejects_bare_backslash():
     with pytest.raises(ValueError, match="bare backslash"):
         email_mcp._validate_flag_atom("\\")
+
+
+# ---------------------------------------------------------------------------
+# email_delete_message + email_expunge — issue #5
+#
+# Split design: ``email_delete_message`` handles the common workflow (move to
+# Trash by default, permanent with ``permanent=True``); ``email_expunge`` is
+# the standalone primitive for power users who already marked ``\\Deleted``
+# via ``email_modify_flags``. Both share the UIDPLUS-or-refuse guard from
+# ``email_move_message``. A new helper ``_resolve_trash_folder`` walks a
+# four-step fallback chain: explicit param → per-account config →
+# ``\\Trash`` SPECIAL-USE flag → hard-coded "Trash".
+#
+# All tests below SHOULD FAIL on first run with AttributeError because the
+# symbols don't exist yet. Per RUNBOOK §7 narrow-except: the pydantic
+# validation test uses ``with pytest.raises(ValidationError)``, never bare
+# ``except Exception``, so a missing-symbol AttributeError can't masquerade
+# as a passing validation.
+# ---------------------------------------------------------------------------
+
+
+# ----------------------------- Group A: delete-to-trash path -----------------
+
+def test_delete_message_default_moves_to_trash_via_special_use(stub_account, monkeypatch):
+    """Default ``permanent=False`` resolves Trash via SPECIAL-USE LIST, COPY+
+    STORE+UID EXPUNGE on the source folder. UIDPLUS available."""
+    imap = _FakeIMAP()  # default list_resp advertises \Trash on "Trash"
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+        )
+    ))
+
+    assert imap.copied == [("42", "Trash")]
+    assert ("42", "+FLAGS", "(\\Deleted)") in imap.stores
+    assert imap.uid_expunges == ["42"]
+    assert imap.bare_expunged is False
+    assert "Trash" in result
+    assert "42" in result
+    assert imap.logged_out is True
+
+
+def test_delete_message_uses_per_account_trash_folder_override(monkeypatch):
+    """Per-account ``trash_folder`` config wins over SPECIAL-USE detection."""
+    acct = {**ACCT, "trash_folder": "Papierkorb"}
+    monkeypatch.setattr(email_mcp, "_get_account", lambda aid: acct)
+    # list_resp lacks any \Trash flag, so the account config must win.
+    imap = _FakeIMAP(list_resp=[
+        b'(\\HasNoChildren) "/" "INBOX"',
+        b'(\\HasNoChildren \\Sent) "/" "Sent"',
+    ])
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+        )
+    ))
+
+    assert imap.copied == [("42", "Papierkorb")]
+    assert "Papierkorb" in result
+
+
+def test_delete_message_falls_back_to_hardcoded_trash_when_no_special_use_or_config(
+    stub_account, monkeypatch
+):
+    """No override, no per-account config, no SPECIAL-USE → 'Trash' literal."""
+    imap = _FakeIMAP(list_resp=[b'(\\HasNoChildren) "/" "INBOX"'])
+    _install_imap(monkeypatch, imap)
+
+    run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+        )
+    ))
+
+    assert imap.copied == [("42", "Trash")]
+
+
+def test_delete_message_explicit_trash_folder_param_wins_over_special_use(
+    stub_account, monkeypatch
+):
+    """An explicit ``trash_folder`` parameter is the highest-priority override."""
+    imap = _FakeIMAP()  # advertises \Trash on "Trash"
+    _install_imap(monkeypatch, imap)
+
+    run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+            trash_folder="Junk",
+        )
+    ))
+
+    assert imap.copied == [("42", "Junk")]
+
+
+# ----------------------------- Group B: permanent path -----------------------
+
+def test_delete_message_permanent_skips_copy_and_uses_uid_expunge(
+    stub_account, monkeypatch
+):
+    """``permanent=True`` does not COPY; STORE \\Deleted + UID EXPUNGE only."""
+    imap = _FakeIMAP(capabilities=(b"IMAP4REV1", b"UIDPLUS"))
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX", permanent=True,
+        )
+    ))
+
+    assert imap.copied == []
+    assert ("42", "+FLAGS", "(\\Deleted)") in imap.stores
+    assert imap.uid_expunges == ["42"]
+    assert imap.bare_expunged is False
+    assert "42" in result
+    low = result.lower()
+    assert "permanent" in low or "permanently" in low
+
+
+def test_delete_message_permanent_refuses_and_clears_deleted_without_uidplus(
+    stub_account, monkeypatch
+):
+    """Without UIDPLUS, refuse and roll back the \\Deleted flag."""
+    imap = _FakeIMAP(capabilities=(b"IMAP4REV1",))  # no UIDPLUS
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX", permanent=True,
+        )
+    ))
+
+    assert imap.uid_expunges == []
+    assert imap.bare_expunged is False
+    flag_ops = [s for s in imap.stores if s[0] == "42"]
+    assert ("42", "+FLAGS", "(\\Deleted)") in flag_ops
+    assert ("42", "-FLAGS", "(\\Deleted)") in flag_ops
+    assert "UIDPLUS" in result
+    assert "refusing" in result.lower()
+
+
+# ----------------------------- Group C: error / validation -------------------
+
+def test_delete_message_uid_not_found_returns_error(stub_account, monkeypatch):
+    """If the COPY-to-Trash fails with a non-TRYCREATE error, surface it
+    and don't expunge."""
+    class _CopyFailIMAP(_FakeIMAP):
+        def uid(self, cmd, *args):
+            if cmd == "COPY":
+                self.copied.append((args[0], args[1]))
+                return ("NO", [b"UID not found"])
+            return super().uid(cmd, *args)
+
+    imap = _CopyFailIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+        )
+    ))
+
+    assert result.lower().startswith("error")
+    assert "UID not found" in result or "uid not found" in result.lower()
+    assert imap.uid_expunges == []
+
+
+def test_delete_message_unknown_account_returns_error(monkeypatch):
+    """Missing account_id surfaces a clean error, no IMAP contact."""
+    def _missing(aid):
+        raise ValueError(f"Account '{aid}' not found. Use email_list_accounts.")
+    monkeypatch.setattr(email_mcp, "_get_account", _missing)
+
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(account_id="nope", uid="1", folder="INBOX")
+    ))
+
+    assert result.lower().startswith("error")
+    assert "not found" in result.lower()
+
+
+def test_delete_message_rejects_empty_uid(monkeypatch):
+    """Empty ``uid`` is rejected at pydantic construction time.
+
+    Per RUNBOOK §7: narrow except. Catch ``ValidationError`` specifically so
+    an ``AttributeError`` from a missing ``DeleteEmailInput`` cannot pass as
+    a successful validation rejection.
+    """
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        email_mcp.DeleteEmailInput(account_id=ACCT_ID, uid="")
+
+
+def test_delete_message_auto_creates_trash_when_missing(stub_account, monkeypatch):
+    """On TRYCREATE, the tool creates the trash folder and retries COPY."""
+    class _TryCreateIMAP(_FakeIMAP):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self._copy_attempts = 0
+
+        def uid(self, cmd, *args):
+            if cmd == "COPY":
+                self._copy_attempts += 1
+                if self._copy_attempts == 1:
+                    # First COPY: server says target doesn't exist.
+                    return ("NO", [b"[TRYCREATE] Mailbox doesn't exist"])
+                # Second COPY (after create): succeed.
+                self.copied.append((args[0], args[1]))
+                return ("OK", [b""])
+            return super().uid(cmd, *args)
+
+    imap = _TryCreateIMAP()
+    _install_imap(monkeypatch, imap)
+
+    run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+        )
+    ))
+
+    assert "Trash" in imap.created
+    assert imap.copied == [("42", "Trash")]
+    assert imap.uid_expunges == ["42"]
+
+
+# ----------------------------- Group D: email_expunge ------------------------
+
+def test_expunge_with_uid_uses_uid_expunge_when_uidplus_supported(
+    stub_account, monkeypatch
+):
+    """Scoped expunge: UID-only, no STORE, UIDPLUS-required."""
+    imap = _FakeIMAP()  # UIDPLUS present
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_expunge(
+        email_mcp.ExpungeInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+        )
+    ))
+
+    assert imap.selected == ("INBOX", False)
+    assert imap.uid_expunges == ["42"]
+    assert imap.bare_expunged is False
+    assert imap.stores == []
+    assert "42" in result
+    assert "INBOX" in result
+
+
+def test_expunge_without_uid_refuses_unless_confirm_bare_expunge_true(
+    stub_account, monkeypatch
+):
+    """No uid + no confirm flag → refuse with a clear message."""
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_expunge(
+        email_mcp.ExpungeInput(account_id=ACCT_ID, folder="INBOX")
+    ))
+
+    assert result.lower().startswith("error")
+    low = result.lower()
+    assert "bare" in low or "confirm" in low
+    assert imap.bare_expunged is False
+    assert imap.uid_expunges == []
+
+
+def test_expunge_bare_with_confirm_flag_calls_expunge(stub_account, monkeypatch):
+    """``confirm_bare_expunge=True`` + no uid → bare EXPUNGE issued."""
+    imap = _FakeIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_expunge(
+        email_mcp.ExpungeInput(
+            account_id=ACCT_ID, folder="Trash", confirm_bare_expunge=True,
+        )
+    ))
+
+    assert imap.bare_expunged is True
+    assert "Trash" in result
+
+
+def test_expunge_with_uid_refuses_when_no_uidplus(stub_account, monkeypatch):
+    """uid supplied but server lacks UIDPLUS → refuse, do not bare-expunge."""
+    imap = _FakeIMAP(capabilities=(b"IMAP4REV1",))
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_expunge(
+        email_mcp.ExpungeInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+        )
+    ))
+
+    assert "UIDPLUS" in result
+    assert "refusing" in result.lower()
+    assert imap.uid_expunges == []
+    assert imap.bare_expunged is False
+
+
+def test_expunge_non_ok_response_returns_error(stub_account, monkeypatch):
+    """Server returns NO on UID EXPUNGE → tool surfaces the error string."""
+    class _PermDeniedIMAP(_FakeIMAP):
+        def uid(self, cmd, *args):
+            if cmd == "EXPUNGE":
+                return ("NO", [b"PERMISSION DENIED"])
+            return super().uid(cmd, *args)
+
+    imap = _PermDeniedIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_expunge(
+        email_mcp.ExpungeInput(
+            account_id=ACCT_ID, uid="42", folder="INBOX",
+        )
+    ))
+
+    assert result.lower().startswith("error")
+    assert imap.logged_out is True
+
+
+# ----------------------------- Group E: _resolve_trash_folder helper --------
+
+def test_resolve_trash_param_override_wins():
+    """``override`` argument trumps every other source."""
+    conn = _FakeIMAP()  # advertises \Trash on "Trash"
+    assert email_mcp._resolve_trash_folder(
+        conn, {"trash_folder": "X"}, override="Y"
+    ) == "Y"
+
+
+def test_resolve_trash_account_config_beats_special_use():
+    """Per-account config beats SPECIAL-USE detection."""
+    conn = _FakeIMAP()  # advertises \Trash on "Trash"
+    assert email_mcp._resolve_trash_folder(
+        conn, {"trash_folder": "Papierkorb"}
+    ) == "Papierkorb"
+
+
+def test_resolve_trash_account_config_null_falls_through():
+    """Gotcha #1: explicit ``trash_folder: None`` must fall through to
+    SPECIAL-USE detection, not return ``None``."""
+    conn = _FakeIMAP()  # advertises \Trash on "Trash"
+    result = email_mcp._resolve_trash_folder(conn, {"trash_folder": None})
+    assert result == "Trash"
+
+
+def test_resolve_trash_special_use_detected_from_list_response():
+    """SPECIAL-USE \\Trash flag is read out of the LIST response."""
+    conn = _FakeIMAP(list_resp=[b'(\\HasNoChildren \\Trash) "/" "Bin"'])
+    assert email_mcp._resolve_trash_folder(conn, {}) == "Bin"
+
+
+def test_resolve_trash_hardcoded_fallback_when_nothing_found():
+    """Nothing advertises \\Trash → hard-coded 'Trash' default."""
+    conn = _FakeIMAP(list_resp=[b'(\\HasNoChildren) "/" "INBOX"'])
+    assert email_mcp._resolve_trash_folder(conn, {}) == "Trash"

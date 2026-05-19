@@ -1,6 +1,6 @@
 [project]
 name = "multi-mail-dev"
-version = "0.3.11"
+version = "0.3.12"
 description = "Dev-time tooling for the multi-mail MCP plugin (runtime uses PEP 723 inline deps)"
 requires-python = ">=3.10"
 
