@@ -78,3 +78,52 @@ class TestSafeAsyncClientRedirectHook:
         ) as client:
             with pytest.raises(httpx.RequestError):
                 await client.get("http://example.com/")
+
+
+# ---------------------------------------------------------------------------
+# _security.py mop-up (#8 iter-6)
+#
+# Pins:
+#   - `_is_safe_host` ValueError fallthrough inside the resolved-IP loop
+#     (lines 74-75) — fires when getaddrinfo returns a sockaddr whose
+#     first element isn't a parseable IP literal.
+#   - `safe_async_client` factory body (line 139) — every other test
+#     monkeypatches this out; this one calls it directly.
+# ---------------------------------------------------------------------------
+
+
+class TestIsSafeHostSockaddrValueErrorSkip:
+    """When getaddrinfo returns a sockaddr whose address part fails to parse
+    as an IP literal, the loop must `continue` to the next entry, not crash.
+    """
+
+    def test_skips_unparseable_sockaddr_ip(self, monkeypatch):
+        """Mock getaddrinfo to mix a non-IP sockaddr with a valid public IP."""
+        import socket
+
+        fake_infos = [
+            # AF_INET-shaped tuple with garbage address.
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("not-an-ip", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("1.1.1.1", 0)),
+        ]
+        monkeypatch.setattr(sec.socket, "getaddrinfo", lambda *a, **kw: fake_infos)
+
+        ok, reason = sec._is_safe_host("example.com")
+        assert ok is True, reason
+
+
+class TestSafeAsyncClientFactory:
+    """Direct call into the factory — pin the AsyncClient construction (line 139)."""
+
+    @pytest.mark.asyncio
+    async def test_factory_returns_configured_client(self):
+        import httpx
+
+        client = sec.safe_async_client(timeout=10.0)
+        try:
+            assert isinstance(client, httpx.AsyncClient)
+            # event hooks include the SSRF guard
+            hooks = client.event_hooks.get("request", [])
+            assert sec._enforce_ssrf_on_request in hooks
+        finally:
+            await client.aclose()

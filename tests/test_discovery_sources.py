@@ -309,3 +309,85 @@ def test_dns_srv_skips_record_pointing_at_root_dot(monkeypatch):
     assert out is not None
     assert out["imap_host"] == "imap.example.com"
     assert out["imap_port"] == 143
+
+
+# ---------------------------------------------------------------------------
+# Additional discovery branches — issue #8 iter-6 mop-up
+# ---------------------------------------------------------------------------
+
+
+def test_microsoft_autodiscover_post_exception_continues_to_next_url(monkeypatch):
+    """A POST exception on the first URL must not stop the loop — the second
+    URL still gets tried. Pins lines 1054-1055."""
+    primary = "https://autodiscover.example.com/autodiscover/autodiscover.xml"
+    fallback = "https://example.com/autodiscover/autodiscover.xml"
+    client = _FakeAsyncClient(
+        post={fallback: _FakeResp(status_code=200, text=MICROSOFT_XML)},
+        raise_on={primary},
+    )
+    _install_client(monkeypatch, client)
+    out = run(email_mcp._try_microsoft_autodiscover(
+        "example.com", "alice@example.com",
+    ))
+    assert out is not None
+    assert out["imap_host"] == "imap.example.com"
+    # Both URLs were attempted.
+    assert ("POST", primary) in client.calls
+    assert ("POST", fallback) in client.calls
+
+
+def test_microsoft_autodiscover_skips_unparseable_response(monkeypatch):
+    """POST returns 200 with junk XML → parser returns None → continue to next URL.
+
+    Pins partial branch 1052->1046 (the `if result:` false arm).
+    """
+    primary = "https://autodiscover.example.com/autodiscover/autodiscover.xml"
+    fallback = "https://example.com/autodiscover/autodiscover.xml"
+    client = _FakeAsyncClient(post={
+        primary: _FakeResp(status_code=200, text="<<not xml"),
+        fallback: _FakeResp(status_code=200, text=MICROSOFT_XML),
+    })
+    _install_client(monkeypatch, client)
+    out = run(email_mcp._try_microsoft_autodiscover(
+        "example.com", "alice@example.com",
+    ))
+    assert out is not None
+    assert out["imap_host"] == "imap.example.com"
+    # Continued past the unparseable primary.
+    assert ("POST", primary) in client.calls
+    assert ("POST", fallback) in client.calls
+
+
+def test_wellknown_dav_get_fallback_after_propfind_404(monkeypatch):
+    """PROPFIND returns 404 → GET fallback runs. If GET returns 200 on a
+    different URL, that URL is captured as the dav root. Pins the GET
+    fallback branch in `_try_wellknown_dav`."""
+    caldav_path = "https://example.com/.well-known/caldav"
+    real_dav = "https://example.com/dav/caldav/"
+    client = _FakeAsyncClient(
+        request={
+            # PROPFIND for caldav returns 404; carddav not configured.
+        },
+        get={caldav_path: _FakeResp(status_code=200, url=real_dav)},
+    )
+    _install_client(monkeypatch, client)
+    out = run(email_mcp._try_wellknown_dav("example.com"))
+    assert out is not None
+    assert out["caldav_url"] == real_dav
+
+
+def test_wellknown_dav_propfind_redirect_uses_location_header(monkeypatch):
+    """A 301/302 from PROPFIND with a Location header captures that URL.
+    Pins lines 1188-1191."""
+    caldav_path = "https://example.com/.well-known/caldav"
+    redirected = "https://dav.example.com/cal/"
+    client = _FakeAsyncClient(request={
+        ("PROPFIND", caldav_path): _FakeResp(
+            status_code=301, url=caldav_path,
+            headers={"location": redirected},
+        ),
+    })
+    _install_client(monkeypatch, client)
+    out = run(email_mcp._try_wellknown_dav("example.com"))
+    assert out is not None
+    assert out["caldav_url"] == redirected
