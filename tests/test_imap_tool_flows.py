@@ -126,6 +126,76 @@ def test_list_folders_returns_sorted_markdown(stub_account, monkeypatch):
     assert fake.logged_out is True
 
 
+def test_list_folders_parses_atom_form_names(stub_account, monkeypatch):
+    """Mailbox names returned as unquoted atoms (RFC 3501) must round-trip.
+
+    The reporter's Dovecot/mailcow server emits LIST responses without quoting
+    the mailbox name; the old ``rsplit('"', 2)`` parser then extracts the
+    delimiter ``/`` instead of the folder name.
+    """
+    fake = _FakeIMAP(list_resp=[
+        b'(\\HasNoChildren) "/" INBOX',
+        b'(\\HasNoChildren) "/" Sent',
+    ])
+    _install_imap(monkeypatch, fake)
+
+    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    assert "- INBOX" in result
+    assert "- Sent" in result
+    # The delimiter must NOT leak through as a folder name.
+    assert "- /" not in result
+    # Sorted alphabetically.
+    assert result.index("- INBOX") < result.index("- Sent")
+    assert fake.logged_out is True
+
+
+def test_list_folders_parses_literal_form_tuple(stub_account, monkeypatch):
+    """imaplib returns literal-form mailbox names as a ``(header, name)`` tuple.
+
+    A mixed list (one tuple + one bytes entry) exercises both branches of the
+    parser in a single response.
+    """
+    fake = _FakeIMAP(list_resp=[
+        (b'(\\HasNoChildren) "/" {6}', b'Drafts'),
+        b'(\\HasNoChildren) "/" "INBOX"',
+    ])
+    _install_imap(monkeypatch, fake)
+
+    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    assert "- Drafts" in result
+    assert "- INBOX" in result
+    # Exactly two folder lines — nothing dropped, nothing extra.
+    folder_lines = [ln for ln in result.splitlines() if ln.startswith("- ")]
+    assert len(folder_lines) == 2
+
+
+def test_list_folders_parses_quoted_name_with_space(stub_account, monkeypatch):
+    """A quoted name containing whitespace must survive intact."""
+    fake = _FakeIMAP(list_resp=[
+        b'(\\HasNoChildren) "/" "My Folder"',
+        b'(\\HasNoChildren) "/" "INBOX"',
+    ])
+    _install_imap(monkeypatch, fake)
+
+    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    assert "- My Folder" in result
+    assert "- INBOX" in result
+
+
+def test_list_folders_heading_falls_back_when_display_name_is_none(monkeypatch):
+    """``acct.get('display_name', acct_id)`` returns ``None`` when the field
+    is serialized as ``null`` — the heading must fall back to ``account_id``.
+    """
+    acct_with_null_name = dict(ACCT, display_name=None)
+    monkeypatch.setattr(email_mcp, "_get_account", lambda aid: acct_with_null_name)
+    fake = _FakeIMAP(list_resp=[b'(\\HasNoChildren) "/" "INBOX"'])
+    _install_imap(monkeypatch, fake)
+
+    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    assert f"# Folders for {ACCT_ID}" in result
+    assert "for None" not in result
+
+
 def test_list_folders_surfaces_imap_error(stub_account, monkeypatch):
     fake = _FakeIMAP()
 

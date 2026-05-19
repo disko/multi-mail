@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "multi-mail",
   "display_name": "Multi mail",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Connect to multiple self-hosted mail servers — IMAP, SMTP, Sieve filters, CalDAV calendars, and CardDAV contacts",
   "long_description": "Multi-mail exposes 31 MCP tools for IMAP/SMTP email, ManageSieve filters, CalDAV calendars, and CardDAV contacts. Supports multiple accounts, autodiscovery, SSRF-guarded DAV requests, and TLS-verified network access. Account configuration is stored in ~/.claude/multi-mail-accounts.json.",
   "author": {
