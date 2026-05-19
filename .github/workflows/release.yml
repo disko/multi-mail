@@ -24,7 +24,7 @@ jobs:
       should_release: ${{ steps.compare.outputs.should_release }}
       tag_exists: ${{ steps.compare.outputs.tag_exists }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -94,9 +94,9 @@ jobs:
     if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
 
@@ -104,7 +104,7 @@ jobs:
         run: bash scripts/pack-mcpb.sh
 
       - name: Upload bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: multi-mail-mcpb
           path: .mcpb-cache/*.mcpb
