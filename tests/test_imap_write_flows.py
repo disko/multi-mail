@@ -580,3 +580,77 @@ def test_modify_flags_unknown_account_returns_error(monkeypatch):
 
     assert result.lower().startswith("error")
     assert "not found" in result.lower()
+
+
+def test_modify_flags_remove_store_failure_returns_error_after_add_succeeded(
+    stub_account, monkeypatch
+):
+    # Add STORE succeeds, remove STORE fails — second branch (line 2018).
+    class _RemoveFailingIMAP(_FakeIMAP):
+        def uid(self, cmd, *args):
+            self.stores.append(args)
+            if cmd == "STORE" and args[1] == "-FLAGS":
+                return ("NO", [b"QUOTA"])
+            return ("OK", [b""])
+
+    imap = _RemoveFailingIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="9",
+            add_flags=["\\Seen"], remove_flags=["\\Flagged"],
+        )
+    ))
+
+    assert result.lower().startswith("error updating flags")
+    assert "QUOTA" in result
+    # Both STOREs were attempted; remove was the failing one.
+    assert any(a[1] == "+FLAGS" for a in imap.stores)
+    assert any(a[1] == "-FLAGS" for a in imap.stores)
+    assert imap.logged_out is True
+
+
+def test_modify_flags_swallows_logout_exception(stub_account, monkeypatch):
+    # Server crashes mid-logout after a successful STORE — must not surface
+    # the logout error to the caller (lines 2026-2027).
+    class _LogoutBoomIMAP(_FakeIMAP):
+        def logout(self):
+            self.logged_out = True
+            raise ConnectionResetError("server hung up during LOGOUT")
+
+    imap = _LogoutBoomIMAP()
+    _install_imap(monkeypatch, imap)
+
+    result = run(email_mcp.email_modify_flags(
+        email_mcp.ModifyFlagsInput(
+            account_id=ACCT_ID, uid="1", add_flags=["\\Seen"],
+        )
+    ))
+
+    assert "Flags updated" in result
+    assert "hung up" not in result.lower()
+    assert imap.logged_out is True
+
+
+# ---------------------------------------------------------------------------
+# _validate_flag_atom unit tests — direct invocation covers defensive branches
+# that pydantic's List[str] type would otherwise prevent reaching.
+# ---------------------------------------------------------------------------
+
+def test_validate_flag_atom_rejects_non_string():
+    # Defensive isinstance check (line 568) is unreachable through the
+    # pydantic model (typed List[str]), but the helper is also called
+    # internally; test the contract directly.
+    with pytest.raises(ValueError, match="not a string"):
+        email_mcp._validate_flag_atom(42)  # type: ignore[arg-type]
+
+
+def test_validate_flag_atom_rejects_empty_string():
+    with pytest.raises(ValueError, match="empty string"):
+        email_mcp._validate_flag_atom("")
+
+
+def test_validate_flag_atom_rejects_bare_backslash():
+    with pytest.raises(ValueError, match="bare backslash"):
+        email_mcp._validate_flag_atom("\\")
