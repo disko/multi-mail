@@ -1444,3 +1444,76 @@ def test_forward_swallows_logout_exception(stub_account, monkeypatch, fake_smtp)
         )
     ))
     assert "Forwarded to team@example.com" in result
+
+
+# ---------------------------------------------------------------------------
+# Final coverage gaps (#8 iter-7).
+# ---------------------------------------------------------------------------
+
+
+class _NoSentIMAP(_FakeIMAP):
+    """IMAP fake where every ``select()`` returns NO — exercises the loop-
+    exhaust path in ``_send_message`` after SMTP succeeded."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.appended = 0
+
+    def select(self, folder, readonly=False):
+        return ("NO", [b""])
+
+    def append(self, *args, **kwargs):
+        self.appended += 1
+        return ("OK", [b""])
+
+
+def test_send_message_sent_folder_loop_exhausts_without_append(
+    stub_account, monkeypatch,
+):
+    """All four ``Sent`` candidates return NO from ``select()`` → the for-
+    loop exhausts without triggering ``append``. SMTP still succeeded, so
+    the tool returns its confirmation. Pins partial 1817->1828 (loop body
+    completes without break)."""
+    smtp = _FakeSMTP()
+    _install_smtp(monkeypatch, smtp)
+    imap = _NoSentIMAP()
+    monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: imap)
+
+    result = run(email_mcp.email_send_message(
+        email_mcp.SendEmailInput(
+            account_id=ACCT_ID, to="alice@example.com",
+            subject="loop-exhaust", body="body",
+        )
+    ))
+    assert "Email sent" in result
+    assert len(smtp.sendmail_calls) == 1
+    # No append happened — every candidate select returned NO.
+    assert imap.appended == 0
+
+
+def test_reply_to_message_without_message_id_skips_references_update(
+    stub_account, monkeypatch, fake_smtp,
+):
+    """Original message has no Message-ID header → ``if message_id:`` is
+    False; the references header stays untouched. The reply still goes out.
+    Pins partial 1922->1925."""
+    # Build a raw message WITHOUT a Message-ID header.
+    msg = email.mime.text.MIMEText("orig body", "plain", "utf-8")
+    msg["From"] = "alice@example.com"
+    msg["To"] = "me@example.com"
+    msg["Subject"] = "orig subject"
+    msg["Date"] = "Mon, 13 May 2026 12:00:00 +0000"
+    # Deliberately no Message-ID — Python's MIMEText doesn't add one by
+    # default.
+    assert msg.get("Message-ID", "") == ""
+
+    imap = _FakeIMAP(fetch_bodies={"7": msg.as_bytes()})
+    _install_imap(monkeypatch, imap)
+    result = run(email_mcp.email_reply(email_mcp.ReplyEmailInput(
+        account_id=ACCT_ID, uid="7", body="thanks",
+    )))
+    assert "Reply sent" in result
+    assert len(fake_smtp.sendmail_calls) == 1
+    sent_wire = fake_smtp.sendmail_calls[0][2]
+    # Without a Message-ID on the original, no In-Reply-To is added.
+    assert "In-Reply-To:" not in sent_wire

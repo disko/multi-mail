@@ -464,7 +464,7 @@ def _parse_imap_list_line(item: Any) -> Optional[str]:
     # Atom: per RFC 3501 §9, atoms contain no whitespace; take the last
     # token to be defensive against trailing whitespace/CRLF residue.
     tokens = text.split()
-    if not tokens:
+    if not tokens:  # pragma: no cover -- text was lstripped + truthy, so split() yields >=1 token
         return None
     return tokens[-1]
 

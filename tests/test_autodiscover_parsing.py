@@ -196,3 +196,93 @@ def test_parse_microsoft_returns_none_when_no_protocols():
         '</Autodiscover>'
     )
     assert email_mcp._parse_microsoft_autodiscover(xml) is None
+
+
+# ---------------------------------------------------------------------------
+# Mozilla autoconfig — empty-element + missing-emailProvider (#8 iter-7)
+#
+# Each ``if x is not None and x.text:`` arm short-circuits when ``x.text`` is
+# None or empty. An XML element like ``<hostname/>`` parses to a node with
+# ``.text = None``; six partials (986->988, 988->990, 990->992, 1003->1005,
+# 1005->1007, 1007->1009) all reduce to "the element exists but the text
+# guard is false". The full doc with empty incoming AND outgoing elements
+# exercises every one in a single parse.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_mozilla_skips_elements_with_empty_text():
+    """All six element-text guards trip false: hostname/port/socketType/
+    username in incoming, hostname/port/socketType in outgoing. No host
+    keys are set so the parser returns None (line 1018-1019).
+    Pins partials 986->988, 988->990, 990->992, 1003->1005, 1005->1007,
+    1007->1009."""
+    xml = (
+        '<?xml version="1.0"?>'
+        '<clientConfig version="1.1">'
+        '<emailProvider id="example.com">'
+        '<incomingServer type="imap">'
+        '<hostname></hostname><port></port>'
+        '<socketType></socketType><username></username>'
+        '</incomingServer>'
+        '<outgoingServer type="smtp">'
+        '<hostname></hostname><port></port><socketType></socketType>'
+        '</outgoingServer>'
+        '</emailProvider>'
+        '</clientConfig>'
+    )
+    # Neither imap_host nor smtp_host was populated → return None.
+    assert email_mcp._parse_mozilla_autoconfig(xml) is None
+
+
+def test_parse_mozilla_skips_provider_block_when_absent():
+    """No <emailProvider> in the doc → the displayName lookup branch is
+    skipped. Hosts still populate from root-level incoming/outgoing servers.
+    Pins partial 1013->1018."""
+    xml = (
+        '<?xml version="1.0"?>'
+        '<clientConfig version="1.1">'
+        '<incomingServer type="imap">'
+        '<hostname>imap.example.com</hostname>'
+        '<port>993</port>'
+        '<socketType>SSL</socketType>'
+        '</incomingServer>'
+        '</clientConfig>'
+    )
+    result = email_mcp._parse_mozilla_autoconfig(xml)
+    assert result is not None
+    assert result["imap_host"] == "imap.example.com"
+    assert "provider_name" not in result
+
+
+# ---------------------------------------------------------------------------
+# Microsoft autodiscover — SMTP Protocol with no Server (#8 iter-7)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_microsoft_smtp_protocol_without_server_skips_assignment():
+    """A <Protocol> block with Type=SMTP but no <Server> → the ``elif`` arm
+    short-circuits (server is falsy), the loop continues to the next
+    <Protocol>. Pins partial 1103->1081."""
+    xml = (
+        '<?xml version="1.0"?>'
+        '<Autodiscover>'
+        '<Response><Account>'
+        '<Protocol>'
+        '<Type>SMTP</Type>'
+        '<Port>587</Port>'
+        '<Encryption>STARTTLS</Encryption>'
+        '</Protocol>'
+        '<Protocol>'
+        '<Type>IMAP</Type>'
+        '<Server>imap.example.com</Server>'
+        '<Port>993</Port>'
+        '<Encryption>SSL</Encryption>'
+        '</Protocol>'
+        '</Account></Response>'
+        '</Autodiscover>'
+    )
+    result = email_mcp._parse_microsoft_autodiscover(xml)
+    assert result is not None
+    assert result["imap_host"] == "imap.example.com"
+    # SMTP block had no Server element → it was skipped.
+    assert "smtp_host" not in result

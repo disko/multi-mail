@@ -277,3 +277,82 @@ def test_get_body_returns_empty_on_singlepart_without_payload():
     # MIMEText defaults set a charset; with empty payload _get_body falls
     # through and returns "".
     assert _get_body(msg) == ""
+
+
+# ---------------------------------------------------------------------------
+# _get_body — multipart-walk continue-after-empty-payload (#8 iter-7)
+#
+# When a multipart message has a payload-bearing part AFTER an empty part of
+# the same content-type, the parser must continue past the empty part rather
+# than short-circuit. Pins partials 367->363 (text/plain loop) and 375->371
+# (text/html fallback loop).
+# ---------------------------------------------------------------------------
+
+
+def test_get_body_multipart_continues_past_empty_text_plain():
+    """Two text/plain parts: first empty, second has content. Pins 367->363."""
+    msg = email.mime.multipart.MIMEMultipart()
+    p1 = email.mime.text.MIMEText("", "plain", "utf-8")
+    p1.set_payload(b"")
+    p2 = email.mime.text.MIMEText("real content", "plain", "utf-8")
+    msg.attach(p1)
+    msg.attach(p2)
+    assert _get_body(msg) == "real content"
+
+
+def test_get_body_multipart_html_fallback_continues_past_empty_part():
+    """No text/plain, two text/html parts: first empty, second has content.
+    Pins 375->371."""
+    msg = email.mime.multipart.MIMEMultipart()
+    p1 = email.mime.text.MIMEText("", "html", "utf-8")
+    p1.set_payload(b"")
+    p2 = email.mime.text.MIMEText("<b>real</b>", "html", "utf-8")
+    msg.attach(p1)
+    msg.attach(p2)
+    assert _get_body(msg) == "<b>real</b>"
+
+
+# ---------------------------------------------------------------------------
+# _parse_imap_list_line — paren-handling partials (#8 iter-7)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_imap_list_line_no_leading_paren_uses_atom_delim_path():
+    """Input doesn't start with '(' → the flag-group strip is skipped and
+    the first token is taken as the delimiter atom. Pins partial 428->443."""
+    # No flag group; the first token IS the delimiter atom (NIL).
+    # Then the rest is the mailbox name.
+    assert _parse_imap_list_line(b'NIL Inbox') == "Inbox"
+
+
+def test_parse_imap_list_line_nested_parens_in_flag_group():
+    """Nested parens in the flag group keep depth > 0 until the outer
+    closer. Pins partial 435->430 (loop continues past inner close)."""
+    assert _parse_imap_list_line(b'(()()) "/" "INBOX"') == "INBOX"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_trash_folder — list-status NO + \Trash-parse-fail (#8 iter-7)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_trash_folder_list_status_not_ok_falls_through():
+    """``conn.list()`` returns ("NO", []) → the `if status == "OK"` arm is
+    skipped; function falls through to the hardcoded "Trash" default.
+    Pins 501->516."""
+    class _NOIMAP:
+        def list(self):
+            return ("NO", [])
+    assert email_mcp._resolve_trash_folder(_NOIMAP(), {"id": "x"}) == "Trash"
+
+
+def test_resolve_trash_folder_trash_flag_with_unparseable_name_skips():
+    """LIST entry contains the ``\\Trash`` flag (so substring scan hits) but
+    ``_parse_imap_list_line`` returns None for the line → continue. With no
+    other Trash candidate found, fall back to the hardcoded default.
+    Pins partial 511->502."""
+    class _BadIMAP:
+        def list(self):
+            # Unterminated quoted name → parser returns None at line 462.
+            return ("OK", [b'(\\HasNoChildren \\Trash) "/" "unterminated'])
+    assert email_mcp._resolve_trash_folder(_BadIMAP(), {"id": "x"}) == "Trash"

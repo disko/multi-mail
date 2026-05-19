@@ -197,3 +197,52 @@ def test_save_accounts_closes_fd_and_reraises_on_dump_failure(config, monkeypatc
 
     with pytest.raises(IOError, match="disk full"):
         email_mcp._save_accounts([{"id": "z"}])
+
+
+# ---------------------------------------------------------------------------
+# _save_accounts non-POSIX (#8 iter-7) — both chmod blocks are guarded by
+# ``if os.name == "posix"``. On a Windows host both blocks are skipped and
+# the function just opens/writes/closes the fd. The CI matrix runs on POSIX
+# only, so we monkeypatch ``os.name`` to ``"nt"`` to exercise the skip path.
+# Pins partial branches 90->95 and 105->exit.
+# ---------------------------------------------------------------------------
+
+
+def test_save_accounts_skips_chmod_when_os_name_is_not_posix(config, monkeypatch):
+    """On a non-POSIX host (``os.name != "posix"``) both chmod blocks short-
+    circuit. The file is still written; ACLs are the caller's responsibility
+    on Windows. Pins partials 90->95 and 105->exit.
+
+    Strategy: instead of monkeypatching ``os.name`` directly (which would
+    break ``pathlib`` because Path internally reads ``os.name`` to pick its
+    flavor), we replace ``email_mcp.os`` with a thin shim whose ``name``
+    attribute is ``"nt"`` and which delegates everything else. The
+    production code uses ``email_mcp.os.name`` for its two checks, so the
+    shim intercepts both — but the pathlib import was already resolved at
+    module load with the real os.name (``"posix"``) so Path() still works.
+    """
+    import os as _real_os
+    chmod_calls = []
+
+    class _OsShim:
+        name = "nt"  # the only value we override
+
+        def __getattr__(self, attr):
+            return getattr(_real_os, attr)
+
+    shim = _OsShim()
+
+    # Override chmod via the shim too, so we can assert it's never called.
+    def _track_chmod(path, mode):
+        chmod_calls.append((str(path), mode))
+        return _real_os.chmod(path, mode)
+    shim.chmod = _track_chmod  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(email_mcp, "os", shim)
+
+    email_mcp._save_accounts([{"id": "w"}])
+
+    # Both chmod blocks were guarded by `if os.name == "posix":` → skipped.
+    assert chmod_calls == []
+    # Payload still landed on disk.
+    assert json.loads(config.read_text()) == {"accounts": [{"id": "w"}]}

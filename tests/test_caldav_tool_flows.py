@@ -532,3 +532,69 @@ def test_update_event_adds_summary_when_missing(stub_account, monkeypatch):
     assert "updated" in result.lower()
     assert "SUMMARY:Now has one" in target.data
     assert target.saved == 1
+
+
+# ---------------------------------------------------------------------------
+# Final coverage gaps (#8 iter-7).
+# ---------------------------------------------------------------------------
+
+
+def test_get_calendar_matches_named_calendar_case_insensitively(
+    stub_account, monkeypatch,
+):
+    """Two calendars; request the second one by name. Returns the matched
+    calendar — both exact-case and lowercase requests succeed. Pins line
+    2601 (the ``return cal`` inside the match loop)."""
+    cals = [
+        _FakeCalendar("Work", url="https://dav.example.com/dav/work/"),
+        _FakeCalendar("Personal", url="https://dav.example.com/dav/personal/"),
+    ]
+    monkeypatch.setattr(email_mcp, "_caldav_client", lambda acct: _FakeClient(cals))
+    assert email_mcp._get_calendar(ACCT, name="Personal").name == "Personal"
+    # Case-insensitive match works too.
+    assert email_mcp._get_calendar(ACCT, name="personal").name == "Personal"
+
+
+def test_create_event_with_location_and_description_writes_both_lines(cal_with_events):
+    """Both ``location`` and ``description`` supplied → both add() calls
+    fire. Pins line 2779 (``vevent.add("description")…``) explicitly,
+    complementing the iter-6 ``without_location_or_description`` test."""
+    cal_with_events.saved_events.clear()
+    run(email_mcp.cal_create_event(email_mcp.CalCreateEventInput(
+        account_id=ACCT_ID,
+        summary="Furnished event",
+        dtstart="2026-06-01T10:00:00",
+        dtend="2026-06-01T10:30:00",
+        location="Room X",
+        description="My description",
+    )))
+    payload = cal_with_events.saved_events[0]
+    assert "SUMMARY:Furnished event" in payload
+    assert "LOCATION:Room X" in payload
+    assert "DESCRIPTION:My description" in payload
+
+
+def test_update_event_overwrites_existing_location_and_description(
+    stub_account, monkeypatch,
+):
+    """Event already has LOCATION and DESCRIPTION → the hasattr arms are
+    True → ``vevent.location.value`` / ``vevent.description.value``
+    overwrite paths fire. Pins lines 2827 and 2832 (the True arms of the
+    location and description hasattr checks)."""
+    populated = _FakeEvent(_ical(
+        "ev-pop", "Original", location="Room A", description="Original desc",
+    ))
+    cal = _FakeCalendar("Work", events=[populated])
+    monkeypatch.setattr(email_mcp, "_get_calendar", lambda acct, name=None: cal)
+
+    result = run(email_mcp.cal_update_event(email_mcp.CalUpdateEventInput(
+        account_id=ACCT_ID, uid="ev-pop",
+        location="Room B replacement",
+        description="Replacement desc",
+    )))
+    assert "updated" in result.lower()
+    assert "Room B replacement" in populated.data
+    assert "Replacement desc" in populated.data
+    # Originals were overwritten, not appended.
+    assert "Room A" not in populated.data
+    assert "Original desc" not in populated.data

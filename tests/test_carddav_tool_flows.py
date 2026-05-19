@@ -868,3 +868,28 @@ def test_delete_contact_outer_except_when_get_account_raises(monkeypatch):
     )))
     assert result.startswith("Error deleting contact")
     assert "del-acct boom" in result
+
+
+# ---------------------------------------------------------------------------
+# card_get_contact — no-email rendering branch (#8 iter-7)
+# ---------------------------------------------------------------------------
+
+
+def test_get_contact_omits_email_line_when_vcard_has_no_email(
+    stub_account, stub_books, monkeypatch,
+):
+    """vCard with no EMAIL field → the ``if c.get("email"):`` arm is False
+    and the ``**Email**`` line is omitted from the rendered output. Pins
+    partial 3115->3117 (skip the email-line append, fall through to the
+    tel check)."""
+    _install_vcards(monkeypatch, [
+        ("/dav/abooks/personal/solo.vcf",
+         _vcard("solo-1", "Solo Contact", email_=None, tel="+15550100")),
+    ])
+    result = run(email_mcp.card_get_contact(email_mcp.CardGetContactInput(
+        account_id=ACCT_ID, uid="solo-1", addressbook_name="Personal",
+    )))
+    assert "# Contact: Solo Contact" in result
+    assert "**UID**: solo-1" in result
+    assert "**Email**" not in result
+    assert "**Phone**: +15550100" in result
