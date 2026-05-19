@@ -345,4 +345,6 @@ def test_autodiscover_tool_omits_imap_block_when_only_smtp_discovered(monkeypatc
     ))
     assert "## IMAP" not in out
     assert "## SMTP (Outgoing)" in out
-    assert "smtp.example.com" in out
+    # Anchored: the host shows up in the production-formatted host line,
+    # not as a free-floating substring. (CodeQL anchored-assertion rule.)
+    assert "- **Host**: smtp.example.com" in out
