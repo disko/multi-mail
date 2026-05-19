@@ -178,3 +178,102 @@ def test_map_socket_type_plaintext_is_none():
     assert _map_socket_type("plain") == "none"
     assert _map_socket_type("") == "none"
     assert _map_socket_type("anything-else") == "none"
+
+
+# ---------------------------------------------------------------------------
+# _parse_imap_list_line — defensive branches for malformed inputs (#8 iter-6)
+#
+# RFC 3501 LIST responses are messy in the wild. The parser must not crash on
+# malformed input — it returns None and the caller drops the entry. These
+# tests pin every defensive return-None branch.
+# ---------------------------------------------------------------------------
+
+_parse_imap_list_line = email_mcp._parse_imap_list_line
+
+
+def test_parse_imap_list_line_tuple_with_none_payload_returns_none():
+    """imaplib literal-form tuples must have a bytes payload at index 1.
+    None means we received header bytes but no literal body — bail."""
+    assert _parse_imap_list_line((b'(\\HasNoChildren) "/" {5}', None)) is None
+
+
+def test_parse_imap_list_line_tuple_with_non_decodable_payload_returns_none():
+    """Tuple's index-1 element isn't bytes-like → AttributeError → return None.
+    Pins lines 416-417."""
+    # Pass a non-bytes object (int has no .decode) — caught by the
+    # AttributeError handler.
+    assert _parse_imap_list_line((b'(\\HasNoChildren) "/" {5}', 12345)) is None
+
+
+def test_parse_imap_list_line_short_tuple_returns_none():
+    """A single-element tuple is malformed — return None."""
+    assert _parse_imap_list_line((b'(\\HasNoChildren) "/" {5}',)) is None
+
+
+def test_parse_imap_list_line_unknown_type_returns_none():
+    """Anything that's neither bytes/bytearray nor tuple → None."""
+    assert _parse_imap_list_line(123) is None
+    assert _parse_imap_list_line(None) is None
+    assert _parse_imap_list_line("not bytes") is None
+
+
+def test_parse_imap_list_line_empty_text_returns_none():
+    """Whitespace-only bytes → None."""
+    assert _parse_imap_list_line(b"   ") is None
+    assert _parse_imap_list_line(b"") is None
+
+
+def test_parse_imap_list_line_unbalanced_parens_returns_none():
+    """Opening paren never closes → None."""
+    assert _parse_imap_list_line(b'(\\HasNoChildren "/" "INBOX"') is None
+
+
+def test_parse_imap_list_line_unterminated_delimiter_returns_none():
+    """Quoted delimiter starts but never closes → None."""
+    assert _parse_imap_list_line(b'(\\HasNoChildren) "/ INBOX') is None
+
+
+def test_parse_imap_list_line_atom_delimiter_no_name_returns_none():
+    """Atom-form delimiter (NIL) with no following mailbox token → None."""
+    assert _parse_imap_list_line(b'(\\HasNoChildren) NIL') is None
+
+
+def test_parse_imap_list_line_unterminated_quoted_name_returns_none():
+    """Mailbox name opens with " but never closes → None."""
+    assert _parse_imap_list_line(b'(\\HasNoChildren) "/" "INBOX') is None
+
+
+def test_parse_imap_list_line_only_delimiter_returns_none():
+    """Quoted delimiter consumes the input — nothing left for the name → None.
+
+    Pins the post-delimiter empty-text return (line 456).
+    """
+    # After parsing `(\\HasNoChildren)` and `"/"`, the remainder is just
+    # whitespace → empty text branch fires.
+    assert _parse_imap_list_line(b'(\\HasNoChildren) "/"   ') is None
+
+
+def test_parse_imap_list_line_atom_form_returns_last_token():
+    """Atom-form mailbox name (no quotes) — pins the tokens[-1] path (467-469)."""
+    assert _parse_imap_list_line(b'(\\HasNoChildren) "/" INBOX') == "INBOX"
+
+
+def test_parse_imap_list_line_atom_form_nil_delimiter_returns_name():
+    """Atom NIL delimiter + atom mailbox name → name extracted (no delimiter)."""
+    assert _parse_imap_list_line(b'(\\HasNoChildren) NIL INBOX') == "INBOX"
+
+
+# ---------------------------------------------------------------------------
+# _get_body — fall-through paths (#8 iter-6)
+# ---------------------------------------------------------------------------
+
+
+def test_get_body_returns_empty_on_singlepart_without_payload():
+    """A singlepart message with an empty payload returns "". Pins the
+    `if payload:` false branch at line 380->383."""
+    msg = email.mime.text.MIMEText("", "plain", "utf-8")
+    # Force payload to be falsy.
+    msg.set_payload(b"")
+    # MIMEText defaults set a charset; with empty payload _get_body falls
+    # through and returns "".
+    assert _get_body(msg) == ""

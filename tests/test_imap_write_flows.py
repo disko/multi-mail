@@ -1237,3 +1237,210 @@ def test_forward_returns_error_when_original_fetch_fails(stub_account, monkeypat
         )
     ))
     assert "Error: Could not fetch message UID 999" in result
+
+
+# ---------------------------------------------------------------------------
+# Additional defensive branches — issue #8 iter-6 mop-up
+#
+# Pins:
+#   - _resolve_trash_folder LIST-exception swallow (lines 513-515).
+#   - _resolve_trash_folder LIST-tuple-item handling (lines 505-508).
+#   - email_send_message outer-except (lines 1861-1862).
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_trash_swallows_list_exception():
+    """``conn.list()`` raises → except clause swallows; fallback to ``"Trash"``."""
+    class _RaisingIMAP:
+        def list(self, *args, **kwargs):
+            raise RuntimeError("LIST kaput")
+
+    result = email_mcp._resolve_trash_folder(_RaisingIMAP(), {})
+    assert result == "Trash"
+
+
+def test_resolve_trash_special_use_from_tuple_list_item():
+    """LIST entry returned as imaplib literal-form tuple is scanned for the
+    ``\\Trash`` flag too. Pins the `elif isinstance(item, tuple)` branch."""
+    class _TupleListIMAP:
+        capabilities = (b"IMAP4REV1",)
+
+        def list(self, *args, **kwargs):
+            # Literal-form tuple: (header_bytes_with_flags, mailbox_name_bytes)
+            return ("OK", [
+                (b'(\\HasNoChildren \\Trash) "/" {7}', b"Deleted"),
+                b'(\\HasNoChildren) "/" "INBOX"',
+            ])
+
+    result = email_mcp._resolve_trash_folder(_TupleListIMAP(), {})
+    assert result == "Deleted"
+
+
+def test_resolve_trash_skips_unknown_list_item_types():
+    """LIST entry that's neither bytes nor a tuple-with-bytes[0] → `continue`.
+    Pins line 508 (the `else: continue` arm in the loop)."""
+    class _WeirdListIMAP:
+        def list(self, *args, **kwargs):
+            return ("OK", [
+                12345,  # not bytes, not a tuple of bytes
+                (None, b"unused"),  # tuple but item[0] isn't bytes
+                b'(\\HasNoChildren \\Trash) "/" "RealTrash"',
+            ])
+
+    assert email_mcp._resolve_trash_folder(_WeirdListIMAP(), {}) == "RealTrash"
+
+
+def test_send_message_tool_outer_except_when_get_account_raises(monkeypatch):
+    """``email_send_message`` outer-except: ``_get_account`` raises →
+    "Error sending email: …" returned. Pins lines 1861-1862."""
+    def _boom(aid):
+        raise RuntimeError("acct boom")
+
+    monkeypatch.setattr(email_mcp, "_get_account", _boom)
+
+    result = run(email_mcp.email_send_message(
+        email_mcp.SendEmailInput(
+            account_id=ACCT_ID, to="x@example.com", subject="s", body="b",
+        )
+    ))
+    assert result.startswith("Error sending email")
+    assert "acct boom" in result
+
+
+def test_add_account_input_rejects_unknown_security_value():
+    """``imap_security="weird"`` must be rejected by the field validator.
+    Pins line 744-745 — the `raise ValueError(...)` arm."""
+    import pydantic
+    with pytest.raises(pydantic.ValidationError, match="Must be 'ssl'"):
+        email_mcp.AddAccountInput(**_input_kwargs(id="bad", imap_security="weird"))
+
+
+def test_add_account_input_normalises_security_value_case():
+    """An uppercase value must round-trip through the validator and be
+    lowercased. Pins line 746 — the validator's happy-path `return v`."""
+    inp = email_mcp.AddAccountInput(
+        **_input_kwargs(id="lc", imap_security="SSL", smtp_security="STARTTLS"),
+    )
+    assert inp.imap_security == "ssl"
+    assert inp.smtp_security == "starttls"
+
+
+def test_send_message_tool_happy_path_returns_confirmation(stub_account, monkeypatch):
+    """``email_send_message`` happy path: SMTP succeeds, Sent-folder save
+    succeeds, tool returns the confirmation string. Pins lines 1858-1860."""
+    smtp = _FakeSMTP()
+    monkeypatch.setattr(email_mcp, "_smtp_connect", lambda acct: smtp)
+    monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: _FakeIMAP())
+
+    result = run(email_mcp.email_send_message(
+        email_mcp.SendEmailInput(
+            account_id=ACCT_ID, to="alice@example.com",
+            subject="hello", body="body text",
+        )
+    ))
+    assert "Email sent from me@example.com to alice@example.com" in result
+    assert '"hello"' in result
+    assert len(smtp.sendmail_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-tool logout-swallow tests for the tools iter-5 didn't reach.
+# Each fake's `logout()` raises; the production code's inner
+# ``except Exception: pass`` must swallow it so the tool still returns its
+# success/error string. Pins lines 1552-1553, 1700-1701, 1902-1903,
+# 1969-1970, 2051-2052, 2140-2141, 2204-2205.
+# ---------------------------------------------------------------------------
+
+
+class _LogoutRaisingIMAP(_FakeIMAP):
+    def logout(self):
+        raise OSError("logout fail")
+
+
+def test_delete_folder_swallows_logout_exception(stub_account, monkeypatch):
+    imap = _LogoutRaisingIMAP()
+    _install_imap(monkeypatch, imap)
+    result = run(email_mcp.email_delete_folder(
+        email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="OldStuff")
+    ))
+    assert "deleted from" in result
+
+
+def test_search_messages_swallows_logout_exception(stub_account, monkeypatch):
+    imap = _LogoutRaisingIMAP(fetch_bodies={"1": _msg_bytes(subject="hit")})
+    # Force search to return UID 1.
+    orig_uid = imap.uid
+
+    def _uid(cmd, *args):
+        if cmd == "SEARCH":
+            return ("OK", [b"1"])
+        return orig_uid(cmd, *args)
+    imap.uid = _uid
+    _install_imap(monkeypatch, imap)
+    result = run(email_mcp.email_search_messages(
+        email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
+    ))
+    # Happy result, even though logout raised.
+    assert "# Search Results" in result
+
+
+def test_move_message_swallows_logout_exception(stub_account, monkeypatch):
+    imap = _LogoutRaisingIMAP()
+    _install_imap(monkeypatch, imap)
+    result = run(email_mcp.email_move_message(
+        email_mcp.MoveEmailInput(
+            account_id=ACCT_ID, uid="1",
+            source_folder="INBOX", dest_folder="Archive",
+        )
+    ))
+    assert "moved" in result.lower()
+
+
+def test_delete_message_swallows_logout_exception(stub_account, monkeypatch):
+    imap = _LogoutRaisingIMAP()
+    _install_imap(monkeypatch, imap)
+    result = run(email_mcp.email_delete_message(
+        email_mcp.DeleteEmailInput(
+            account_id=ACCT_ID, uid="1", folder="INBOX", permanent=True,
+        )
+    ))
+    assert "permanently deleted" in result
+
+
+def test_expunge_swallows_logout_exception(stub_account, monkeypatch):
+    imap = _LogoutRaisingIMAP()
+    _install_imap(monkeypatch, imap)
+    result = run(email_mcp.email_expunge(
+        email_mcp.ExpungeInput(
+            account_id=ACCT_ID, folder="INBOX", uid="1",
+        )
+    ))
+    assert "Expunged UID 1" in result
+
+
+def test_reply_swallows_logout_exception(stub_account, monkeypatch, fake_smtp):
+    # fake_smtp installs both SMTP and a default IMAP (for Sent save). Override
+    # the IMAP with one whose logout raises so the first inner-finally fires.
+    raising = _LogoutRaisingIMAP(
+        fetch_bodies={"1": _msg_bytes(frm="alice@example.com", subject="hi")},
+    )
+    _install_imap(monkeypatch, raising)
+    result = run(email_mcp.email_reply(
+        email_mcp.ReplyEmailInput(
+            account_id=ACCT_ID, uid="1", body="thanks",
+        )
+    ))
+    assert "Reply sent to" in result
+
+
+def test_forward_swallows_logout_exception(stub_account, monkeypatch, fake_smtp):
+    raising = _LogoutRaisingIMAP(
+        fetch_bodies={"1": _msg_bytes(subject="please forward")},
+    )
+    _install_imap(monkeypatch, raising)
+    result = run(email_mcp.email_forward(
+        email_mcp.ForwardEmailInput(
+            account_id=ACCT_ID, uid="1", to="team@example.com",
+        )
+    ))
+    assert "Forwarded to team@example.com" in result

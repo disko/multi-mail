@@ -513,3 +513,51 @@ def test_search_messages_skips_fetch_failures_via_continue(stub_account, monkeyp
     assert "searched" in result
     body_rows = [ln for ln in result.splitlines() if ln.startswith("| ") and "UID" not in ln and "---" not in ln]
     assert len(body_rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# Additional tool body branches — issue #8 iter-6 mop-up
+# ---------------------------------------------------------------------------
+
+
+def test_list_messages_empty_folder_returns_friendly_message(stub_account, monkeypatch):
+    """SEARCH returns no UIDs → 'No messages in {folder}.' early return.
+    Pins line 1596."""
+    fake = _FakeIMAP(search_uids=b"")
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_list_messages(
+        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+    ))
+    assert result == "No messages in INBOX."
+
+
+def test_read_message_no_cc_omits_cc_line(stub_account, monkeypatch):
+    """A message without a Cc header must NOT render '**CC**:' in the output.
+    Pins the false arm of `if msg.get("Cc"):` at line 1745."""
+    # _msg_bytes default has no Cc.
+    fake = _FakeIMAP(fetch_bodies={"7": _msg_bytes(subject="no-cc")})
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_read_message(
+        email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="7", folder="INBOX")
+    ))
+    assert "**Subject**: no-cc" in result
+    assert "**CC**" not in result
+
+
+def test_read_message_with_cc_renders_cc_line(stub_account, monkeypatch):
+    """A message WITH a Cc header must render '**CC**:'. Pins the true arm
+    of `if msg.get("Cc"):` at line 1746."""
+    import email.mime.text
+    msg = email.mime.text.MIMEText("body", "plain", "utf-8")
+    msg["From"] = "alice@example.com"
+    msg["To"] = "me@example.com"
+    msg["Cc"] = "cc@example.com"
+    msg["Subject"] = "has-cc"
+    msg["Date"] = "Mon, 13 May 2026 12:00:00 +0000"
+
+    fake = _FakeIMAP(fetch_bodies={"8": msg.as_bytes()})
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_read_message(
+        email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="8", folder="INBOX")
+    ))
+    assert "**CC**: cc@example.com" in result

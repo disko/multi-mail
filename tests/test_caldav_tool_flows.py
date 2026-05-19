@@ -445,3 +445,90 @@ def test_delete_event_outer_except_returns_error(stub_account, monkeypatch):
     )))
     assert result.startswith("Error deleting event")
     assert "del boom" in result
+
+
+# ---------------------------------------------------------------------------
+# _get_calendar + cal_create_event + cal_update_event mop-up (#8 iter-6)
+# ---------------------------------------------------------------------------
+
+
+def test_get_calendar_raises_when_no_calendars(stub_account, monkeypatch):
+    """Empty principal.calendars() → ValueError("No calendars found …").
+    Pins lines 2596-2597."""
+    monkeypatch.setattr(email_mcp, "_caldav_client", lambda acct: _FakeClient([]))
+    with pytest.raises(ValueError, match="No calendars found"):
+        email_mcp._get_calendar(ACCT, name=None)
+
+
+def test_get_calendar_raises_when_named_calendar_missing(stub_account, monkeypatch):
+    """Requested name not in the calendar list → ValueError listing the
+    available names. Pins lines 2602-2606."""
+    cals = [
+        _FakeCalendar("Work", url="https://dav.example.com/dav/work/"),
+        _FakeCalendar("Personal", url="https://dav.example.com/dav/personal/"),
+    ]
+    monkeypatch.setattr(email_mcp, "_caldav_client", lambda acct: _FakeClient(cals))
+    with pytest.raises(ValueError) as excinfo:
+        email_mcp._get_calendar(ACCT, name="Nonexistent")
+    msg = str(excinfo.value)
+    assert "Nonexistent" in msg
+    assert "Available" in msg
+    assert "Work" in msg
+    assert "Personal" in msg
+
+
+def test_get_calendar_returns_first_when_no_name(stub_account, monkeypatch):
+    """No name supplied → first calendar is returned. Sanity-pins the
+    happy path of the helper through a direct call."""
+    cals = [
+        _FakeCalendar("First", url="https://dav.example.com/dav/first/"),
+        _FakeCalendar("Second", url="https://dav.example.com/dav/second/"),
+    ]
+    monkeypatch.setattr(email_mcp, "_caldav_client", lambda acct: _FakeClient(cals))
+    assert email_mcp._get_calendar(ACCT, name=None).name == "First"
+
+
+def test_create_event_without_location_or_description_skips_add(cal_with_events):
+    """No ``location`` and no ``description`` → those add()s never fire.
+    Pins partials 2776->2778 and 2779."""
+    cal_with_events.saved_events.clear()
+    result = run(email_mcp.cal_create_event(email_mcp.CalCreateEventInput(
+        account_id=ACCT_ID,
+        summary="Bare event",
+        dtstart="2026-06-01T10:00:00",
+        dtend="2026-06-01T10:30:00",
+    )))
+    assert "Event 'Bare event' created" in result
+    assert len(cal_with_events.saved_events) == 1
+    payload = cal_with_events.saved_events[0]
+    assert "SUMMARY:Bare event" in payload
+    assert "LOCATION:" not in payload
+    assert "DESCRIPTION:" not in payload
+
+
+def test_update_event_adds_summary_when_missing(stub_account, monkeypatch):
+    """An event whose vobject parse has no ``summary`` attribute → the
+    `else: vevent.add("summary").value = …` arm fires. Pins line 2820.
+    """
+    # Craft an iCal blob with UID/DTSTART/DTEND but NO SUMMARY.
+    bare_ical = (
+        "BEGIN:VCALENDAR\r\n"
+        "VERSION:2.0\r\n"
+        "PRODID:-//test//EN\r\n"
+        "BEGIN:VEVENT\r\n"
+        "UID:no-summary\r\n"
+        "DTSTART:20260601T100000Z\r\n"
+        "DTEND:20260601T110000Z\r\n"
+        "END:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    )
+    target = _FakeEvent(bare_ical)
+    cal = _FakeCalendar("Work", events=[target])
+    monkeypatch.setattr(email_mcp, "_get_calendar", lambda acct, name=None: cal)
+
+    result = run(email_mcp.cal_update_event(email_mcp.CalUpdateEventInput(
+        account_id=ACCT_ID, uid="no-summary", summary="Now has one",
+    )))
+    assert "updated" in result.lower()
+    assert "SUMMARY:Now has one" in target.data
+    assert target.saved == 1

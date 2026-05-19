@@ -126,3 +126,74 @@ def test_get_account_raises_when_not_found(config):
 def test_get_account_raises_on_empty_config(config):
     with pytest.raises(ValueError, match="not found"):
         email_mcp._get_account("anything")
+
+
+# ---------------------------------------------------------------------------
+# _save_accounts error-path branches (issue #8 iter-6)
+#
+# Pins the OSError-swallow on chmod(parent dir) / chmod(file) and the
+# json.dump-fails-then-close-fd-and-reraise path. These never fire under
+# normal CI (the writes succeed, chmod succeeds) but they exist for a
+# reason — a partial filesystem or a tmpfs without permission semantics
+# should not crash the tool.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX-only chmod path")
+def test_save_accounts_swallows_chmod_oserror_on_parent_dir(config, monkeypatch):
+    """First chmod call (parent dir, mode 0o700) raises OSError → swallow."""
+    real_chmod = os.chmod
+    calls = []
+
+    def patched_chmod(path, mode):
+        calls.append((str(path), mode))
+        if mode == 0o700:
+            raise OSError("simulated parent-dir chmod failure")
+        return real_chmod(path, mode)
+
+    monkeypatch.setattr(os, "chmod", patched_chmod)
+
+    # Must not raise.
+    email_mcp._save_accounts([{"id": "x"}])
+    # Parent-dir chmod was attempted.
+    assert any(mode == 0o700 for _, mode in calls)
+    # File still written.
+    assert json.loads(config.read_text()) == {"accounts": [{"id": "x"}]}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX-only chmod path")
+def test_save_accounts_swallows_chmod_oserror_on_file(config, monkeypatch):
+    """Second chmod call (file, mode 0o600) raises OSError → swallow."""
+    real_chmod = os.chmod
+    file_chmod_attempts = []
+
+    def patched_chmod(path, mode):
+        if mode == 0o600:
+            file_chmod_attempts.append(str(path))
+            raise OSError("simulated file chmod failure")
+        return real_chmod(path, mode)
+
+    monkeypatch.setattr(os, "chmod", patched_chmod)
+
+    email_mcp._save_accounts([{"id": "y"}])
+    # Attempt was made on the file path.
+    assert any(p.endswith("accounts.json") for p in file_chmod_attempts)
+    # File still written despite chmod failure.
+    assert json.loads(config.read_text()) == {"accounts": [{"id": "y"}]}
+
+
+def test_save_accounts_closes_fd_and_reraises_on_dump_failure(config, monkeypatch):
+    """``json.dump`` raises → the fd is closed in the except branch and the
+    original exception propagates. Pins lines 99-104.
+    """
+    import json as _json
+
+    def boom(*args, **kwargs):
+        raise IOError("disk full")
+
+    monkeypatch.setattr(_json, "dump", boom)
+    # The module imports json at top level; patching the global is enough.
+    monkeypatch.setattr(email_mcp, "json", _json)
+
+    with pytest.raises(IOError, match="disk full"):
+        email_mcp._save_accounts([{"id": "z"}])

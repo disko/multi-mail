@@ -809,3 +809,62 @@ def test_delete_contact_skips_vcards_that_fail_to_parse(stub_account, stub_books
     # The malformed entry was skipped; the valid one matched and was deleted.
     assert "deleted" in result.lower()
     assert len(client.delete_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# card_search_contacts + card_create_contact + card_delete_contact mop-up
+# (#8 iter-6) — empty-result branch, no-email create branch, outer-excepts
+# ---------------------------------------------------------------------------
+
+
+def test_search_contacts_returns_friendly_message_when_empty(
+    stub_account, stub_books, monkeypatch,
+):
+    """Empty address book → 'No contacts found.' (line 3057)."""
+    _install_vcards(monkeypatch, [])
+    result = run(email_mcp.card_search_contacts(email_mcp.CardSearchContactsInput(
+        account_id=ACCT_ID, query="alice", addressbook_name="Personal",
+    )))
+    assert result == "No contacts found."
+
+
+def test_create_contact_without_email_omits_email_field(
+    stub_account, stub_books, monkeypatch,
+):
+    """``email=None`` → the `if params.email:` branch is false. Pins partial
+    3168->3171."""
+    client = _install_client(monkeypatch, _FakeResponse(status_code=201))
+    result = run(email_mcp.card_create_contact(email_mcp.CardCreateContactInput(
+        account_id=ACCT_ID, fn="Bob NoEmail", tel="+15550133",
+        addressbook_name="Personal",
+    )))
+    assert "created" in result.lower()
+    assert len(client.put_calls) == 1
+    body = client.put_calls[0]["content"]
+    assert "FN:Bob NoEmail" in body
+    assert "TEL:+15550133" in body
+    assert "EMAIL" not in body
+
+
+def test_create_contact_outer_except_when_get_account_raises(monkeypatch):
+    """``_get_account`` raises → 'Error creating contact: …' (lines 3199-3200)."""
+    def _boom(aid):
+        raise RuntimeError("acct boom")
+    monkeypatch.setattr(email_mcp, "_get_account", _boom)
+    result = run(email_mcp.card_create_contact(email_mcp.CardCreateContactInput(
+        account_id=ACCT_ID, fn="x", email="x@example.com",
+    )))
+    assert result.startswith("Error creating contact")
+    assert "acct boom" in result
+
+
+def test_delete_contact_outer_except_when_get_account_raises(monkeypatch):
+    """``_get_account`` raises → 'Error deleting contact: …' (lines 3341-3342)."""
+    def _boom(aid):
+        raise RuntimeError("del-acct boom")
+    monkeypatch.setattr(email_mcp, "_get_account", _boom)
+    result = run(email_mcp.card_delete_contact(email_mcp.CardDeleteContactInput(
+        account_id=ACCT_ID, uid="c1",
+    )))
+    assert result.startswith("Error deleting contact")
+    assert "del-acct boom" in result
