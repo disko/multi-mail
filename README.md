@@ -228,13 +228,13 @@ open htmlcov/index.html
 
 | Module | Coverage | Status |
 |--------|----------|--------|
-| `servers/_security.py` | 96% | SSRF guard, redirect hook, DAV host pinning |
-| `servers/email_mcp.py` | ~71% | Helpers, account IO, message assembly, vCard/iCal formatters, IMAP read + write flows (folder CRUD, move with UIDPLUS branch, reply, forward), CardDAV/CalDAV/Sieve tool flows, autodiscover orchestrator + all four discovery sources |
+| `servers/_security.py` | **100%** | SSRF guard, redirect hook, DAV host pinning |
+| `servers/email_mcp.py` | **100%** | Every tool flow, helper, validator, and error branch — 412 tests across 15 files |
 
-Coverage is being increased phase by phase (see roadmap below) starting with the modules that have the highest blast radius (security, autodiscovery, server interaction). Three real bugs and one security fix have been surfaced by this coverage work so far.
+Coverage was driven phase by phase (see roadmap below) starting with the modules with the highest blast radius (security, autodiscovery, server interaction) and finishing with a seven-iteration sweep that closed the last 25 percentage points. The coverage work surfaced **three real bugs** and **one security fix** along the way (Sieve null fallback, calendar UID formatter, header decoder, accounts.json permissions).
 
 <details>
-<summary>Coverage roadmap (steps 1–8 ✅ done)</summary>
+<summary>Coverage roadmap (all 17 steps ✅ done — 24% → 100%)</summary>
 
 1. ✅ Account management (`tests/test_account_io.py`)
 2. ✅ Message formatting (`tests/test_message_building.py`)
@@ -246,6 +246,13 @@ Coverage is being increased phase by phase (see roadmap below) starting with the
 8. ✅ Autodiscover orchestrator (`tests/test_autodiscover_orchestrator.py`)
 9. ✅ Remaining IMAP/account write paths — `email_add_account` (dedupe + disk persistence), `email_create_folder`/`delete_folder`, `email_move_message` (both UIDPLUS branches), `email_reply` (threading + reply-all addressee filtering), `email_forward` (`tests/test_imap_write_flows.py`)
 10. ✅ Discovery sources — `_try_mozilla_autoconfig` (primary URL, well-known fallback, network-error swallow), `_try_microsoft_autodiscover` (subdomain primary, root-domain fallback), `_try_wellknown_dav` (PROPFIND 207, partial discovery), `_try_dns_srv` (SSL-over-STARTTLS preference, RFC 2782 target-`.` rejection) — fake httpx client + fake `dig` subprocess (`tests/test_discovery_sources.py`)
+11. ✅ `card_update_contact` + CardDAV PROPFIND/list-vcards helpers (`tests/test_carddav_tool_flows.py` extensions)
+12. ✅ `email_autodiscover` markdown formatter + `email_list_accounts` / `email_remove_account` wrappers (`tests/test_autodiscover_orchestrator.py` + new `tests/test_account_tool_flows.py`)
+13. ✅ Connection helper variant matrix — `_imap_connect`/`_smtp_connect`/`_caldav_client`/`_carddav_headers` across SSL/STARTTLS/insecure/plaintext (`tests/test_connection_helpers.py`)
+14. ✅ Outer `except` tails on cal/card/sieve tool flows + body-branch sweep
+15. ✅ IMAP outer-except tails + body-branch sweep + Sieve logout-swallow + CardDAV body-branches
+16. ✅ Defensive validators/helpers + autodiscover XML parser branches + `_security.py` mop-up to 100%
+17. ✅ Final cleanup — last 11 statements + 29 partial branches; one annotated `# pragma: no cover` for a provably unreachable defensive branch
 </details>
 
 ### Build the Desktop bundle locally
@@ -272,6 +279,24 @@ For deeper contributor notes, see [CLAUDE.md](CLAUDE.md).
 ---
 
 ## Changelog
+
+### 0.3.13 — 100% test coverage milestone
+
+No runtime changes. Seven-iteration coverage sweep took both `servers/_security.py` and `servers/email_mcp.py` to **100% statements + 100% branches** (project total **75% → 100%**), driven autonomously by the `fix-issue-team` agent pipeline. 412 tests across 15 files; one annotated `# pragma: no cover` on a single defensive branch that is provably unreachable. See [issue #8](https://github.com/disko/multi-mail/issues/8) for the per-iteration breakdown.
+
+### 0.3.12 — message deletion tools
+
+- **Added:** `email_delete_message` — trash-by-default workflow with optional `permanent` flag (STORE `+FLAGS \Deleted` + EXPUNGE, UIDPLUS-required for the permanent path). Auto-detects the server's SPECIAL-USE `\Trash` folder, falls back to `acct["trash_folder"]` and finally `"Trash"`; auto-creates the Trash folder on TRYCREATE. Accepts a single UID or a list. Closes [#5](https://github.com/disko/multi-mail/issues/5).
+- **Added:** `email_expunge` — standalone EXPUNGE on a folder for power users, with a `confirm_bare_expunge` guard to prevent accidental empty-folder wipes.
+
+### 0.3.11 — IMAP flag manipulation
+
+- **Added:** `email_modify_flags` — STORE `+FLAGS`/`-FLAGS` on a UID. Accepts `add_flags` and `remove_flags` lists; both can be set in one call. Validates flag atoms against IMAP-disallowed characters before sending. Closes [#3](https://github.com/disko/multi-mail/issues/3).
+
+### 0.3.10 — IMAP LIST parser + "for None" headings
+
+- **Fixed:** `email_list_folders` rendered every entry as a single `/` (the hierarchy delimiter) on Dovecot/mailcow servers that emit unquoted-atom mailbox names per RFC 3501. The old `rsplit('"', 2)[-2]` parser only handled fully-quoted responses. New `_parse_imap_list_line` helper handles quoted, atom, and imaplib's literal-form tuple shapes. Closes [#4](https://github.com/disko/multi-mail/issues/4).
+- **Fixed:** Seven tool headings rendered `for None` when the account had no `display_name` set. The `dict.get("display_name", X)` idiom returns the stored `None`, not `X` — same gotcha that bit v0.3.2. Swept all sites to `acct.get("display_name") or params.account_id`.
 
 ### 0.3.9 — Sieve error diagnostics
 
