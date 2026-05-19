@@ -94,6 +94,16 @@ When the issue shape is a coverage campaign, you have extra work:
 - Look for existing tests that cover the broken path. If they exist and
   pass, the test fixture didn't exercise the failing case — note which input
   shape is uncovered.
+- **Design-tradeoff table (feature shape, optional).** When the issue body
+  presents a real scope ambiguity — single tool vs split pair, single arg
+  vs list-of, in-band field vs new top-level param, auto-create-on-error
+  vs strict-refuse — surface the tradeoff under a `## Key design decision
+  the planner must make` section with a Markdown table whose columns are
+  concrete costs (test count, surface area, footgun risk, manifest churn).
+  Tilt with named reasons; do not pick a winner unless one is obvious.
+  Skip the table when the feature maps cleanly onto a single anchor sibling
+  with no real choice — adding it for routine work is bloat. Run #5's
+  split-vs-combined table is the worked example.
 
 ## Output: `01-findings.md`
 
