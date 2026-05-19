@@ -28,9 +28,18 @@ in front of a reviewer with CI passing.
      means someone added/changed a dependency mid-flight; surface that
      to the user before continuing.
 2. Stage explicitly (no `git add -A`). Compose a conventional-commit
-   message: `fix(scope): subject` or `feat(scope): subject`. Body
-   references `Fixes #<N>` and lists the user-visible change. Keep subject
-   ≤72 chars.
+   message: `fix(scope): subject`, `feat(scope): subject`, or for
+   **coverage-campaign iterations**: `test(scope): subject` (never `fix`
+   or `feat` if `servers/` is unchanged — the type signals what kind of
+   PR this is to reviewers and to CI's release-trigger path filter).
+   Body references `Fixes #<N>` for bug/feature, or `Closes one chunk of
+   #<N>` for coverage campaigns. Lists the user-visible change. Keep
+   subject ≤72 chars.
+   - **Coverage-iteration staging invariant**: only test files should be
+     dirty. `git status` should show `tests/...` paths and nothing under
+     `servers/`, `manifest.json`, `.claude-plugin/plugin.json`,
+     `pyproject.toml`. If a manifest is dirty on a coverage iteration,
+     something went wrong upstream — stop and surface.
 3. Commit. The pre-commit hooks must pass — never use `--no-verify`.
 4. Push: `git push -u origin HEAD`.
 5. Open the PR with `gh pr create`. Title mirrors the commit subject. Body
@@ -44,6 +53,24 @@ in front of a reviewer with CI passing.
    - [x] manual repro from the issue verified resolved
 
    Fixes #<N>
+   ```
+
+   **Coverage-campaign iterations use a different footer.** If the plan's
+   `## Shape` says coverage campaign, the umbrella issue must stay open
+   across iterations — so the PR body says **"Closes one chunk of #<N>"**
+   (or "One chunk of the coverage campaign tracked in #<N>"), NOT
+   `Fixes #<N>`. GitHub auto-closes the issue on the latter; don't trip
+   it. The Test plan section adds a coverage-delta bullet:
+   ```
+   ## Coverage delta
+   - `servers/email_mcp.py`: <old>% -> <new>%
+   - Repo total: <old>% -> <new>%
+
+   ## Test plan
+   - [x] uv run pytest tests/ --cov=servers — <N> passed
+   - [x] semgrep --config=auto servers/ — 0 findings (source untouched)
+
+   One chunk of the coverage campaign tracked in #<N>.
    ```
 6. **Watch CI.** `gh pr checks --watch` blocks until the run terminates.
    If the suite turns red, capture the failing job logs (`gh run view

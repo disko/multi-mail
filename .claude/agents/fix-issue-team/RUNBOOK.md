@@ -15,10 +15,27 @@ requested capability. Six agents run in sequence; each writes one artifact
 under `.claude/agents/fix-issue-team/runs/<issue-number>/` so later agents
 can pick up cold and the retrospective can score the run.
 
-The team handles both **bug fixes** and **feature requests**. Every agent
-prompt has a "bug vs. feature framing" section — read your own first, then
-the investigator's framing in `01-findings.md` to know which shape this
-run is in.
+The team handles **three issue shapes**: bug fixes, feature requests, and
+**coverage campaigns** (multi-PR iterations against an umbrella issue that
+stays open until coverage hits the target). Every agent prompt has a
+framing section that covers all three — read your own first, then the
+investigator's framing in `01-findings.md` to know which shape this run
+is in.
+
+### Coverage-campaign mode in one paragraph
+
+A coverage campaign is an umbrella issue (e.g. "drive servers/ to 100%")
+that fans out into **N iterations of tests-only PRs**. Each iteration picks
+one tractable uncovered chunk, pins existing behaviour with regression
+tests, ships, and the umbrella issue stays open until the target metric is
+hit. Key inversions from bug/feature work:
+- Tests are expected to **PASS first** (not red). Any failure surfaces a
+  real bug — implementer decides in-scope vs follow-up per the plan.
+- Implementer typically makes **no source changes** (tests-only iteration).
+  No version bump. No manifest edits. The `.mcpb` would be byte-identical.
+- Shipper uses **"Closes one chunk of #N"** in the PR body, NOT `Fixes #N`
+  — the campaign issue must survive the merge.
+- Commit subject is `test(scope): …`, not `fix` / `feat`.
 
 ## Per-run artifact contract
 
@@ -50,7 +67,10 @@ so the orchestrator can show the user a checkpoint at each step.
   (`_imap_connect`, `_get_account`, `_carddav_propfind`, etc.) — not deeper.
 - **Conventional commits**: `fix(scope): …`, `feat(scope): …`,
   `test(scope): …`, `docs(scope): …`. Subject ≤72 chars, imperative mood.
-- **PR titles** mirror the commit subject. PR body references `Fixes #N`.
+- **PR titles** mirror the commit subject. PR body references `Fixes #N`
+  for bug/feature shapes that **close** the issue, or `Closes one chunk of
+  #N` for **coverage-campaign** iterations where the umbrella issue must
+  stay open across multiple PRs.
 
 ## Recurring gotchas (from CLAUDE.md + past runs)
 
@@ -86,6 +106,16 @@ so the orchestrator can show the user a checkpoint at each step.
    `ValueError`, etc.) — never bare `except Exception`. A broad catch
    swallows the `AttributeError` from a missing symbol and turns a
    feature-add red into a false green via the wrong path.
+
+8. **Coverage iteration ≠ TDD red-then-green.** For coverage campaigns
+   (issue shape: campaign), the test-writer's red is **inverted**: tests
+   are expected to PASS on first run because they pin existing behaviour.
+   A failure on first run = a real bug found (see past coverage rounds:
+   header decoder, calendar UID, Sieve null fallback). The test-writer
+   surfaces that to the implementer, who decides in-scope-fix vs
+   follow-up per the plan — they do NOT silently rewrite the test to make
+   it pass. Coverage iteration commits are `test(scope): …`, never `fix`
+   or `feat`, and skip the version bump.
 
 ## IMAP/Sieve/DAV parsing pitfalls (carry forward)
 

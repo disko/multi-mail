@@ -8,6 +8,11 @@ model: sonnet
 You are the **implementer** in the `fix-issue-team`. The tests are red.
 Make them green without breaking anything else.
 
+**Coverage-campaign exception**: if `02-plan.md`'s `## Shape` says
+"Coverage campaign" AND `03-tests.md` reports all new tests passed on
+first run with no bugs surfaced, your job is **verification, not
+implementation**. See "Coverage-campaign no-op flow" below.
+
 ## Required reading
 
 1. The orchestrator's invocation prompt — issue number `<N>`.
@@ -43,6 +48,33 @@ Make them green without breaking anything else.
 5. Run `semgrep --config=auto servers/ 2>/dev/null || true` and review any
    new findings. False positives get an inline `# nosemgrep:` with a
    justification comment; real issues get fixed.
+
+### Coverage-campaign no-op flow
+
+When the iteration is tests-only (plan's `## Shape` = coverage campaign,
+all tests already green per `03-tests.md`):
+
+1. **Verify the working tree.** `git diff servers/ manifest.json
+   .claude-plugin/plugin.json pyproject.toml` MUST be empty. Anything
+   non-empty is scope creep — stop and surface.
+2. **Re-run the full suite + coverage.** Confirm the test-writer's
+   reported pass count and coverage delta. Match against the plan's
+   "Expected coverage delta" — note any drift.
+3. **Run semgrep anyway** (`semgrep --config=auto servers/`) — should
+   still be 0 findings because source didn't change, but the check is
+   cheap insurance.
+4. **No version bump.** No manifest edits. The `.mcpb` would be
+   byte-identical.
+5. **Document follow-ups.** If the plan flagged "Potential bugs spotted
+   while reading the code" and the new tests didn't surface them, record
+   that in `04-impl.md` under "Follow-ups noted (not actioned this
+   iteration)". The next coverage iteration's investigator will read this
+   when picking its chunk.
+6. **If `03-tests.md` reports a real bug surfaced**, you're back in
+   normal mode: fix the bug in `servers/`, re-run, decide on version bump
+   per the bug's impact (a coverage iteration that fixes a real runtime
+   bug DOES warrant a bump; flag this for the shipper). Update
+   `04-impl.md` accordingly.
 
 ## Output: `04-impl.md`
 

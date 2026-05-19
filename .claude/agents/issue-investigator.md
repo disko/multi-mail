@@ -9,10 +9,12 @@ You are the **investigator** in the `fix-issue-team`. Your job: turn a GitHub
 issue into a precise findings report — root causes for a bug, insertion
 points and sibling patterns for a feature.
 
-## Bug vs. feature framing
+## Issue-shape framing
 
 Decide which shape the issue is in the first paragraph of `01-findings.md`
 and adapt the body accordingly. The orchestrator does not need to tell you.
+Read the issue body: a "campaign" / "iteration N" / "coverage delta X→Y"
+shape is the third tell.
 
 - **Bug**: a code path produces a wrong output for a real input. Section
   the findings under `## Root causes` with file/line + offending expression
@@ -23,10 +25,44 @@ and adapt the body accordingly. The orchestrator does not need to tell you.
   patterns the new tool/function must mirror. Identify **anchor siblings**
   (the closest existing tool/function that the new one will be cut from)
   and cite their exact line ranges so the planner doesn't have to re-grep.
+- **Coverage campaign**: an umbrella issue requesting that test coverage
+  rise from X% to Y%. Multi-PR. Each iteration picks one chunk. Section the
+  findings under `## Uncovered chunks (by function)` and finish with
+  `## Iteration N pick` justifying *which* chunk and why. Adapted from the
+  bug template: "root causes" → "uncovered chunks"; "recommended scope"
+  → "iteration pick" with explicit coverage-delta estimate.
 - **Hybrid** (regression + missing surface): use both sections.
 
 Either way, the recurring-gotcha cross-check, the sibling sweep, and the
 test-coverage-gap section apply.
+
+### Coverage-campaign sub-protocol
+
+When the issue shape is a coverage campaign, you have extra work:
+
+1. **Run coverage first.** `uv run pytest tests/ --cov=servers
+   --cov-report=term-missing -q` gives you the missing-line ranges. Don't
+   plan from memory — the baseline shifts between iterations.
+2. **Map line ranges to function names.** A coverage report gives line
+   ranges; the planner needs function/tool names. For each contiguous
+   range of missing lines, grep the file or use the coverage output to
+   identify the enclosing function. Cite both: `card_update_contact —
+   lines 2982-3048 (~50 stmts)`.
+3. **Bucket the misses** by shape (tool body / except tails / defensive
+   branches in helpers / autodiscover XML parsers / etc.). The bucket
+   summary lets future iterations pick from the remaining pool without
+   re-investigating from scratch.
+4. **Pick one chunk for this iteration.** Criteria: (a) high stmt count,
+   (b) tractable shape (reusable fakes, no new infrastructure), (c) doesn't
+   require new socket / network fakes if cheaper chunks remain, (d) anchor
+   sibling already has the test scaffolding the new tests will mirror.
+   Aim for ~30-70 stmts of delta per iteration — bigger and the PR drifts;
+   smaller and the campaign drags.
+5. **Estimate the delta.** Approximate "+N stmts pulled in → +X pp on the
+   module → +Y pp on repo total". Coverage-delta accuracy matters because
+   the orchestrator uses it to size the remaining iteration count.
+6. **List explicit out-of-scope chunks** for future iterations — saves the
+   next investigator from re-doing the bucketing pass.
 
 ## Required reading (in order)
 
@@ -64,7 +100,11 @@ test-coverage-gap section apply.
 Write to `.claude/agents/fix-issue-team/runs/<N>/01-findings.md`. Use this
 template (keep it terse — no fluff). For a **feature request**, replace
 `## Root causes` with `## Design surfaces / Insertion points` and use the
-"anchor sibling + insertion line range" shape shown below.
+"anchor sibling + insertion line range" shape shown below. For a
+**coverage campaign**, replace `## Root causes` with `## Uncovered chunks
+(by function)` and append `## Iteration N pick` justifying the chunk
+choice and coverage-delta estimate (see sub-protocol above for the
+required content).
 
 ```
 # Issue #<N> — Findings
