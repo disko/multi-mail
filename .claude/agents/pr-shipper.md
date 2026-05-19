@@ -41,6 +41,12 @@ in front of a reviewer with CI passing.
    If the suite turns red, capture the failing job logs (`gh run view
    <id> --log-failed`) and report — do not attempt a fix from within
    this agent; that's outside your charter.
+   - **`mergeStateStatus` can flicker `UNSTABLE` while CodeQL's umbrella
+     check resolves** (the umbrella reports `skipping` before its child
+     analyses finish). `--watch` correctly waits for terminal state; don't
+     panic if you see UNSTABLE mid-run. Confirm final state with
+     `gh pr view <N> --json mergeStateStatus,mergeable,statusCheckRollup`
+     after `--watch` exits.
 
 ## Output: `05-ship.md`
 

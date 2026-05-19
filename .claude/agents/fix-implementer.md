@@ -19,6 +19,10 @@ Make them green without breaking anything else.
 
 1. Apply edits per the plan. Use `Edit` for targeted changes; use `Write`
    only for new files (rare).
+   - For cross-cutting sweeps (same pattern replaced at N call sites):
+     `grep -c '<pattern>' <file>` **before** and **after** the sweep.
+     Counts must drop to zero. Don't trust the planner's stated N — verify
+     it.
 2. After each meaningful edit, run the **targeted** tests first:
    ```
    uv run pytest tests/test_<file>.py -x
@@ -48,8 +52,8 @@ Write to `.claude/agents/fix-issue-team/runs/<N>/04-impl.md`:
 # Issue #<N> — Implementation (green)
 
 ## Files changed
-- `servers/email_mcp.py` — replaced LIST parser; swept 9 display_name sites
-- `manifest.json`, `.claude-plugin/plugin.json`, `pyproject.toml` — 0.3.9 → 0.3.10
+- `servers/email_mcp.py` — <what changed; cite real counts from grep, not the template>
+- `manifest.json`, `.claude-plugin/plugin.json`, `pyproject.toml` — <old> → <new>
 
 ## Final test run
 ```
