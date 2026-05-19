@@ -1,6 +1,6 @@
 {
   "name": "multi-mail",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "description": "Connect to multiple self-hosted mail servers — IMAP, SMTP, Sieve filters, CalDAV calendars, and CardDAV contacts",
   "author": {
     "name": "disko"
