@@ -248,13 +248,13 @@ def test_autodiscover_tool_renders_full_imap_smtp_caldav_carddav_markdown(monkey
     assert "mozilla, well-known-dav" in out
     assert "**Provider**: Example Mail" in out
     assert "## IMAP (Incoming)" in out
-    assert "imap.example.com" in out
-    assert "993" in out
-    assert "ssl" in out
+    assert "**Host**: imap.example.com" in out
+    assert "**Port**: 993" in out
+    assert "**Security**: ssl" in out
     assert "## SMTP (Outgoing)" in out
-    assert "smtp.example.com" in out
-    assert "587" in out
-    assert "starttls" in out
+    assert "**Host**: smtp.example.com" in out
+    assert "**Port**: 587" in out
+    assert "**Security**: starttls" in out
     assert "## CalDAV (Calendar)" in out
     assert "https://dav.example.com/caldav/" in out
     assert "## CardDAV (Contacts)" in out
