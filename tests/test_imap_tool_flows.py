@@ -322,3 +322,194 @@ def test_read_message_missing_uid_returns_error(stub_account, monkeypatch):
     )))
     assert "Error: Could not fetch message UID 999" in result
     assert fake.logged_out is True
+
+
+# ---------------------------------------------------------------------------
+# Outer-except tails — `_imap_connect` raises (issue #8 iter-5)
+#
+# Every IMAP-backed read tool wraps its body in
+# ``try: …; except Exception as e: return f"Error: {e}"``. The happy-path
+# tests above exercise the inner try; these tests inject a raising
+# ``_imap_connect`` so the outer except fires.
+# ---------------------------------------------------------------------------
+
+
+def _raising_imap(monkeypatch, exc):
+    """Override _imap_connect to raise ``exc`` on the next call."""
+    def boom(acct):
+        raise exc
+    monkeypatch.setattr(email_mcp, "_imap_connect", boom)
+
+
+def test_list_folders_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom list folders"))
+    result = run(email_mcp.email_list_folders(
+        email_mcp.ListFoldersInput(account_id=ACCT_ID)
+    ))
+    assert result.startswith("Error:")
+    assert "boom list folders" in result
+
+
+def test_list_messages_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom list msgs"))
+    result = run(email_mcp.email_list_messages(
+        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+    ))
+    assert result.startswith("Error:")
+    assert "boom list msgs" in result
+
+
+def test_search_messages_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom search"))
+    result = run(email_mcp.email_search_messages(
+        email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
+    ))
+    assert result.startswith("Error:")
+    assert "boom search" in result
+
+
+def test_read_message_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+    _raising_imap(monkeypatch, RuntimeError("boom read"))
+    result = run(email_mcp.email_read_message(
+        email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="1")
+    ))
+    assert result.startswith("Error:")
+    assert "boom read" in result
+
+
+# ---------------------------------------------------------------------------
+# Inner ``except Exception: pass`` swallow on ``conn.logout()``
+#
+# Each tool's inner ``finally`` wraps ``conn.logout()`` in a try/except so a
+# logout that raises doesn't mask the real return. Hit the swallow branch
+# with a happy-path call against a fake whose ``logout()`` raises.
+# ---------------------------------------------------------------------------
+
+
+def _make_logout_raiser(fake, exc):
+    """Replace ``fake.logout`` with one that raises ``exc``."""
+    def _raise():
+        raise exc
+    fake.logout = _raise
+
+
+def test_list_folders_swallows_logout_exception(stub_account, monkeypatch):
+    fake = _FakeIMAP(list_resp=[b'(\\HasNoChildren) "/" "INBOX"'])
+    _make_logout_raiser(fake, OSError("logout fail"))
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_list_folders(
+        email_mcp.ListFoldersInput(account_id=ACCT_ID)
+    ))
+    # Happy-path output still rendered — the swallow caught OSError.
+    assert "- INBOX" in result
+    assert not result.startswith("Error:")
+
+
+def test_list_messages_swallows_logout_exception(stub_account, monkeypatch):
+    fake = _FakeIMAP(
+        search_uids=b"1",
+        fetch_bodies={"1": _msg_bytes(subject="hi")},
+    )
+    _make_logout_raiser(fake, OSError("logout fail"))
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_list_messages(
+        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+    ))
+    assert "| UID | From | Subject | Date |" in result
+    assert not result.startswith("Error:")
+
+
+def test_read_message_swallows_logout_exception(stub_account, monkeypatch):
+    fake = _FakeIMAP(fetch_bodies={"7": _msg_bytes(body="hello world")})
+    _make_logout_raiser(fake, OSError("logout fail"))
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_read_message(
+        email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="7", mark_read=False)
+    ))
+    assert "hello world" in result
+    assert not result.startswith("Error:")
+
+
+# ---------------------------------------------------------------------------
+# In-body branches: SEARCH-fail, FETCH-continue, pagination suffix
+# (issue #8 iter-5)
+# ---------------------------------------------------------------------------
+
+
+def test_list_messages_returns_error_on_search_failure(stub_account, monkeypatch):
+    fake = _FakeIMAP()
+
+    def _bad_uid(cmd, *args):
+        if cmd == "SEARCH":
+            return ("NO", [b"server busy"])
+        return ("OK", [None])
+    fake.uid = _bad_uid
+    _install_imap(monkeypatch, fake)
+
+    result = run(email_mcp.email_list_messages(
+        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+    ))
+    assert "Error: SEARCH failed" in result
+
+
+def test_list_messages_skips_fetch_failures_via_continue(stub_account, monkeypatch):
+    # UID 4 has no body (FETCH returns NO → continue); UID 5 succeeds.
+    fake = _FakeIMAP(
+        search_uids=b"4 5",
+        fetch_bodies={"5": _msg_bytes(subject="kept")},
+    )
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_list_messages(
+        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+    ))
+    # Both UIDs were fetched (loop ran), but only UID 5 rendered.
+    fetched = [c[0] for c in fake.fetch_calls]
+    assert set(fetched) == {"4", "5"}
+    assert "kept" in result
+    # Only one data row in the markdown table — UID 4 was skipped.
+    body_rows = [ln for ln in result.splitlines() if ln.startswith("| ") and "UID" not in ln and "---" not in ln]
+    assert len(body_rows) == 1
+
+
+def test_list_messages_shows_pagination_hint_when_more_available(stub_account, monkeypatch):
+    # 11 UIDs, limit=5 → 6 unrendered → "More messages available" hint fires.
+    fake = _FakeIMAP(
+        search_uids=b" ".join(str(i).encode() for i in range(1, 12)),
+        fetch_bodies={str(i): _msg_bytes(subject=f"m{i}") for i in range(1, 12)},
+    )
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_list_messages(
+        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX", limit=5, offset=0)
+    ))
+    assert "More messages available" in result
+    assert "offset=5" in result
+
+
+def test_search_messages_returns_error_on_search_failure(stub_account, monkeypatch):
+    fake = _FakeIMAP()
+
+    def _bad_uid(cmd, *args):
+        if cmd == "SEARCH":
+            return ("NO", [b"server busy"])
+        return ("OK", [None])
+    fake.uid = _bad_uid
+    _install_imap(monkeypatch, fake)
+
+    result = run(email_mcp.email_search_messages(
+        email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
+    ))
+    assert "Error: SEARCH failed" in result
+
+
+def test_search_messages_skips_fetch_failures_via_continue(stub_account, monkeypatch):
+    fake = _FakeIMAP(
+        search_uids=b"4 5",
+        fetch_bodies={"5": _msg_bytes(subject="searched")},
+    )
+    _install_imap(monkeypatch, fake)
+    result = run(email_mcp.email_search_messages(
+        email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
+    ))
+    assert "searched" in result
+    body_rows = [ln for ln in result.splitlines() if ln.startswith("| ") and "UID" not in ln and "---" not in ln]
+    assert len(body_rows) == 1

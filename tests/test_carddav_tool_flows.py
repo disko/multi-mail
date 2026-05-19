@@ -709,3 +709,103 @@ def test_card_get_contact_outer_except_returns_error(stub_account, monkeypatch):
     ))
     assert result.startswith("Error:")
     assert "get boom" in result
+
+
+# ---------------------------------------------------------------------------
+# Body branches — card_get_contact / card_create_contact / card_delete_contact
+# (issue #8 iter-5)
+# ---------------------------------------------------------------------------
+
+
+def test_get_contact_renders_org_and_title_when_present(stub_account, stub_books, monkeypatch):
+    """vCard with ORG and TITLE → those rendering branches fire (lines 3119-3122)."""
+    vcard_with_org = (
+        "BEGIN:VCARD\r\n"
+        "VERSION:3.0\r\n"
+        "UID:c1\r\n"
+        "FN:Carol Org\r\n"
+        "N:Org;Carol;;;\r\n"
+        "EMAIL;TYPE=INTERNET:carol@example.com\r\n"
+        "TEL;TYPE=CELL:+15550100\r\n"
+        "ORG:Acme Inc\r\n"
+        "TITLE:Engineer\r\n"
+        "END:VCARD\r\n"
+    )
+    _install_vcards(monkeypatch, [
+        ("/dav/abooks/personal/c1.vcf", vcard_with_org),
+    ])
+    result = run(email_mcp.card_get_contact(
+        email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="c1")
+    ))
+    assert "# Contact: Carol Org" in result
+    assert "**Email**: carol@example.com" in result
+    assert "**Phone**: +15550100" in result
+    assert "**Organization**: Acme Inc" in result
+    assert "**Title**: Engineer" in result
+
+
+def test_get_contact_skips_vcards_that_fail_to_parse(stub_account, stub_books, monkeypatch):
+    """Malformed vCard → vobject.readOne raises → inner `continue` arm (3124-3125)."""
+    valid = _vcard("c1", "Alice Valid", "alice@example.com")
+    _install_vcards(monkeypatch, [
+        ("/a.vcf", "garbage not a vcard"),  # vobject.readOne raises here
+        ("/b.vcf", valid),
+    ])
+    result = run(email_mcp.card_get_contact(
+        email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="c1")
+    ))
+    # The malformed entry was skipped; the valid one rendered.
+    assert "# Contact: Alice Valid" in result
+    assert "**Email**: alice@example.com" in result
+
+
+def test_create_contact_handles_tel_org_title_branches(stub_account, stub_books, monkeypatch):
+    """tel/org/title set → the conditional add branches all fire (3168-3177)."""
+    client = _install_client(monkeypatch, _FakeResponse(status_code=201))
+
+    result = run(email_mcp.card_create_contact(email_mcp.CardCreateContactInput(
+        account_id=ACCT_ID, fn="Dave Multi", email="dave@example.com",
+        tel="+15550111, +15550222",
+        org="Acme",
+        title="Manager",
+        addressbook_name="Personal",
+    )))
+
+    assert len(client.put_calls) == 1
+    body = client.put_calls[0]["content"]
+    # All four optional sections present in the serialized vCard
+    assert "EMAIL:dave@example.com" in body
+    assert "TEL:+15550111" in body
+    assert "TEL:+15550222" in body
+    assert "Acme" in body
+    assert "Manager" in body
+    assert "created" in result.lower()
+
+
+def test_delete_contact_returns_error_on_non_2xx_response(stub_account, stub_books, monkeypatch):
+    """Server returns 403 → ``Error: Server returned 403`` (line 3338)."""
+    _install_vcards(monkeypatch, [
+        ("/a.vcf", _vcard("c1", "Alice", "alice@example.com")),
+    ])
+    _install_client(monkeypatch, _FakeResponse(status_code=403, text="forbidden"))
+
+    result = run(email_mcp.card_delete_contact(email_mcp.CardDeleteContactInput(
+        account_id=ACCT_ID, uid="c1", addressbook_name="Personal",
+    )))
+    assert "Error: Server returned 403" in result
+
+
+def test_delete_contact_skips_vcards_that_fail_to_parse(stub_account, stub_books, monkeypatch):
+    """Malformed vCard in the walk → inner `continue` arm (3324-3325)."""
+    _install_vcards(monkeypatch, [
+        ("/bad.vcf", "garbage not a vcard"),
+        ("/good.vcf", _vcard("c1", "Alice", "alice@example.com")),
+    ])
+    client = _install_client(monkeypatch, _FakeResponse(status_code=204))
+
+    result = run(email_mcp.card_delete_contact(email_mcp.CardDeleteContactInput(
+        account_id=ACCT_ID, uid="c1", addressbook_name="Personal",
+    )))
+    # The malformed entry was skipped; the valid one matched and was deleted.
+    assert "deleted" in result.lower()
+    assert len(client.delete_calls) == 1
