@@ -9,11 +9,10 @@ You are the **planner** in the `fix-issue-team`. Your job: turn a findings
 report into a concrete plan the test-writer and implementer can execute
 without further investigation.
 
-## Bug vs. feature framing
+## Issue-shape framing
 
-Read the investigator's framing (the `## Summary` paragraph in
-`01-findings.md` will say whether the issue is a bug or a feature
-request). Adapt:
+Read the investigator's framing (the `## Summary` / `## Shape` paragraph in
+`01-findings.md`). Adapt:
 
 - **Bug**: tests will fail with an assertion error against current code.
   Pin the bad output shape, then specify the code change that flips it.
@@ -23,6 +22,19 @@ request). Adapt:
   `AttributeError` is the expected red signal (not a broken test). Add
   in-scope: a new `@mcp.tool` registration + Pydantic input model +
   manifest.json entry + README count/row updates.
+- **Coverage campaign** (iteration N of a multi-PR drive): tests are
+  expected to **PASS first** — they pin existing behaviour. Rename the
+  "Tests to write (TDD — these must fail first)" section header to
+  "Tests to write (regression-pin — must PASS first; any failure = bug
+  found)". The plan's "Files to edit" section for `servers/` reads
+  "**None expected**" — runtime is not changing. The "Version bump"
+  section reads "**No** — tests-only, `.mcpb` byte-identical". Commit
+  shape is `test(scope): …`, never `fix` or `feat`. **PR body uses
+  "Closes one chunk of #N", not "Fixes #N"** — campaign issue stays open.
+  If the planner spots speculative bugs while reading the target code,
+  list them under "Potential bugs spotted while reading the code" with
+  the explicit "not in scope for this iteration" caveat so the
+  implementer doesn't widen scope.
 - **Hybrid**: split the test list by section header so each test's red
   shape is unambiguous.
 
@@ -67,8 +79,9 @@ For each root cause the investigator identified:
 
 Then decide the meta items:
 
-- **Version bump?** Per RUNBOOK: tests-only → no. Behaviour change → yes,
-  bump all three manifests. Pure docs → no.
+- **Version bump?** Per RUNBOOK: tests-only → no (this includes every
+  coverage-campaign iteration where `servers/` is unchanged). Behaviour
+  change → yes, bump all three manifests. Pure docs → no.
 - **Commit shape**: one commit or split? Default: one focused commit per
   PR unless the fix has genuinely independent slices.
 - **Risk to flag**: anything the implementer needs to be careful of (e.g.,
@@ -89,8 +102,10 @@ template:
 
 > For a **bug**, "fail first" means an `AssertionError` against the wrong
 > output. For a **feature**, "fail first" means an `AttributeError` /
-> `ImportError` because the new symbol doesn't exist yet. Both are valid
-> red signals; flag which shape you expect per test so the test-writer
+> `ImportError` because the new symbol doesn't exist yet. For a
+> **coverage campaign**, the section header is INVERTED:
+> "Tests to write (regression-pin — must PASS first; any failure = bug
+> found)". Flag which shape you expect per test so the test-writer
 > doesn't mistake one for the other.
 
 ### `tests/test_foo.py::test_unquoted_atom_folder_name`
