@@ -620,3 +620,92 @@ def test_carddav_list_vcards_parse_error_returns_empty(stub_account, monkeypatch
     _install_client(monkeypatch, _FakeResponse(status_code=200, text="<<<not xml>>>"))
     result = run(email_mcp._carddav_list_vcards(ACCT, "/dav/abooks/personal/"))
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Outer-except tail sweep + _get_addressbook_href ValueError paths
+# (coverage iter-4, issue #8)
+#
+# Pins:
+#   - card_list_addressbooks outer except (2982-2983)
+#   - _get_addressbook_href no-books raise (2941-2942) + name-not-found raise (2947-2950)
+#   - card_search_contacts outer except (3081-3082)
+#   - card_get_contact outer except (3127-3128)
+#
+# Note: _carddav_propfind, _get_addressbook_href, _carddav_list_vcards are
+# async coroutines — the raising override must also be async, otherwise the
+# await chain raises TypeError instead of the injected exception.
+# ---------------------------------------------------------------------------
+
+
+def _async_raise_factory(exc):
+    """Return an async function that raises ``exc`` when awaited."""
+    async def boom(*args, **kwargs):
+        raise exc
+    return boom
+
+
+def test_list_addressbooks_outer_except_returns_error(stub_account, monkeypatch):
+    monkeypatch.setattr(
+        email_mcp, "_carddav_propfind",
+        _async_raise_factory(RuntimeError("propfind boom")),
+    )
+    result = run(email_mcp.card_list_addressbooks(
+        email_mcp.CardListAddressBooksInput(account_id=ACCT_ID)
+    ))
+    assert result.startswith("Error:")
+    assert "propfind boom" in result
+
+
+def test_get_addressbook_href_raises_when_no_books(stub_account, monkeypatch):
+    """No address books at all → _get_addressbook_href raises ValueError;
+    card_list_contacts's outer except swallows and surfaces it."""
+    async def empty(acct):
+        return []
+    monkeypatch.setattr(email_mcp, "_carddav_propfind", empty)
+    result = run(email_mcp.card_list_contacts(
+        email_mcp.CardListContactsInput(account_id=ACCT_ID)
+    ))
+    assert result.startswith("Error:")
+    assert "No address books found" in result
+    assert ACCT_ID in result
+
+
+def test_get_addressbook_href_raises_when_name_not_in_books(
+    stub_account, stub_books, monkeypatch
+):
+    """addressbook_name not in propfind list → ValueError listing the
+    available names; card_list_contacts's outer except surfaces it."""
+    result = run(email_mcp.card_list_contacts(
+        email_mcp.CardListContactsInput(
+            account_id=ACCT_ID, addressbook_name="DoesNotExist",
+        )
+    ))
+    assert result.startswith("Error:")
+    assert "Address book 'DoesNotExist' not found" in result
+    assert "Personal" in result
+    assert "Work" in result
+
+
+def test_card_search_contacts_outer_except_returns_error(stub_account, monkeypatch):
+    monkeypatch.setattr(
+        email_mcp, "_get_addressbook_href",
+        _async_raise_factory(RuntimeError("search boom")),
+    )
+    result = run(email_mcp.card_search_contacts(
+        email_mcp.CardSearchContactsInput(account_id=ACCT_ID, query="any")
+    ))
+    assert result.startswith("Error:")
+    assert "search boom" in result
+
+
+def test_card_get_contact_outer_except_returns_error(stub_account, monkeypatch):
+    monkeypatch.setattr(
+        email_mcp, "_get_addressbook_href",
+        _async_raise_factory(RuntimeError("get boom")),
+    )
+    result = run(email_mcp.card_get_contact(
+        email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="x")
+    ))
+    assert result.startswith("Error:")
+    assert "get boom" in result

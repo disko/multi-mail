@@ -306,3 +306,142 @@ def test_delete_event_missing_uid_surfaces_error(cal_with_events):
         account_id=ACCT_ID, uid="ghost",
     )))
     assert result.lower().startswith("error")
+
+
+# ---------------------------------------------------------------------------
+# Outer-except tail sweep + body-branch coverage (coverage iter-4, issue #8)
+#
+# Each cal_* tool wraps its body in a ``try: ... except Exception as e:``
+# return. The happy-path tests above exercise the inner try; these tests
+# inject a raising connect helper so the outer except fires. We also fold
+# in three body-branch tests that are too cheap to defer:
+#   - cal_list_events default-window when no dates supplied
+#   - cal_get_event description-line branch
+#   - cal_update_event non-summary field branches
+# ---------------------------------------------------------------------------
+
+
+def _raising_caldav_client(monkeypatch, exc):
+    def boom(acct):
+        raise exc
+    monkeypatch.setattr(email_mcp, "_caldav_client", boom)
+
+
+def _raising_get_calendar(monkeypatch, exc):
+    def boom(acct, name=None):
+        raise exc
+    monkeypatch.setattr(email_mcp, "_get_calendar", boom)
+
+
+def test_list_calendars_outer_except_returns_error(stub_account, monkeypatch):
+    _raising_caldav_client(monkeypatch, RuntimeError("caldav unreachable"))
+    result = run(email_mcp.cal_list_calendars(
+        email_mcp.CalListCalendarsInput(account_id=ACCT_ID)
+    ))
+    assert result.startswith("Error:")
+    assert "caldav unreachable" in result
+
+
+def test_list_events_outer_except_returns_error(stub_account, monkeypatch):
+    _raising_get_calendar(monkeypatch, RuntimeError("get-cal boom"))
+    result = run(email_mcp.cal_list_events(email_mcp.CalListEventsInput(
+        account_id=ACCT_ID,
+        start="2026-05-01T00:00:00",
+        end="2026-05-31T23:59:59",
+    )))
+    assert result.startswith("Error:")
+    assert "get-cal boom" in result
+
+
+def test_list_events_default_window_when_no_dates_given(cal_with_events):
+    """No start/end → defaults to (now, now + 30d). Fixture events are
+    fixed-date in May 2026, so unless 'now' falls inside that window the
+    result is the empty-window message; either way the default-window
+    body branches execute (lines 2672, 2676-2677)."""
+    result = run(email_mcp.cal_list_events(
+        email_mcp.CalListEventsInput(account_id=ACCT_ID)
+    ))
+    # Either "No events found ..." OR the table header — both prove the
+    # default-window arms ran without raising.
+    assert ("No events found" in result) or ("| Start | End |" in result)
+
+
+def test_create_event_outer_except_returns_error(stub_account, monkeypatch):
+    _raising_get_calendar(monkeypatch, RuntimeError("create boom"))
+    result = run(email_mcp.cal_create_event(email_mcp.CalCreateEventInput(
+        account_id=ACCT_ID,
+        summary="x",
+        dtstart="2026-06-01T10:00:00",
+        dtend="2026-06-01T11:00:00",
+    )))
+    assert result.startswith("Error creating event")
+    assert "create boom" in result
+
+
+def test_get_event_outer_except_returns_error_via_helper(stub_account, monkeypatch):
+    """Helper-raises variant of get_event's outer except — distinct from
+    the existing test_get_event_missing_uid_surfaces_error which reaches
+    the same except via cal.event_by_uid raising."""
+    _raising_get_calendar(monkeypatch, RuntimeError("getevt boom"))
+    result = run(email_mcp.cal_get_event(email_mcp.CalGetEventInput(
+        account_id=ACCT_ID, uid="any",
+    )))
+    assert result.startswith("Error:")
+    assert "getevt boom" in result
+
+
+def test_get_event_renders_description_when_present(stub_account, monkeypatch):
+    """Pin the ``if e.get('description'): ...`` branch (lines 2735-2736)."""
+    cal = _FakeCalendar("Work", events=[
+        _FakeEvent(_ical(
+            "with-desc",
+            "Detailed event",
+            description="Lots of details on this one",
+        )),
+    ])
+    monkeypatch.setattr(email_mcp, "_get_calendar", lambda acct, name=None: cal)
+    result = run(email_mcp.cal_get_event(email_mcp.CalGetEventInput(
+        account_id=ACCT_ID, uid="with-desc",
+    )))
+    assert "Lots of details on this one" in result
+    assert "---" in result  # separator before description block
+
+
+def test_update_event_outer_except_returns_error(stub_account, monkeypatch):
+    _raising_get_calendar(monkeypatch, RuntimeError("update boom"))
+    result = run(email_mcp.cal_update_event(email_mcp.CalUpdateEventInput(
+        account_id=ACCT_ID, uid="x", summary="x",
+    )))
+    assert result.startswith("Error updating event")
+    assert "update boom" in result
+
+
+def test_update_event_changes_dtstart_dtend_location_description(cal_with_events):
+    """Pin the non-summary body branches (lines 2821-2834): when
+    dtstart/dtend/location/description are supplied, each branch's
+    add/overwrite arm executes. ev-1 has no LOCATION or DESCRIPTION so the
+    'add' (no hasattr) arm runs for those; dtstart/dtend always exist so
+    the 'overwrite' arm runs."""
+    target = cal_with_events._events[0]  # ev-1, no location, no description
+    result = run(email_mcp.cal_update_event(email_mcp.CalUpdateEventInput(
+        account_id=ACCT_ID,
+        uid="ev-1",
+        dtstart="2026-05-13T12:00:00",
+        dtend="2026-05-13T13:00:00",
+        location="Building A",
+        description="Updated description",
+    )))
+    assert "updated" in result.lower()
+    assert target.saved == 1
+    # vobject may reformat output; check the substrings made it into the data.
+    assert "Building A" in target.data
+    assert "Updated description" in target.data
+
+
+def test_delete_event_outer_except_returns_error(stub_account, monkeypatch):
+    _raising_get_calendar(monkeypatch, RuntimeError("del boom"))
+    result = run(email_mcp.cal_delete_event(email_mcp.CalDeleteEventInput(
+        account_id=ACCT_ID, uid="x",
+    )))
+    assert result.startswith("Error deleting event")
+    assert "del boom" in result
