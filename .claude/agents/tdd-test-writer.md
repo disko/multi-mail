@@ -35,6 +35,25 @@ fail for the right reason.
 4. Capture the red output for the artifact. Include the assertion error so
    the retrospective can confirm the test actually exercises the bug.
 
+### Narrow your `except` clauses
+
+When a test asserts that bad input is **rejected** (validation error,
+runtime guard, etc.), catch the **specific** exception type — never a
+bare `except Exception`. A broad catch silently swallows the
+`AttributeError` raised by a missing symbol (feature-shape red) and
+makes the test pass against unfixed code via the wrong path.
+
+Rule: `try: ... except pydantic.ValidationError as e: ...` (or the
+specific stdlib exception the production code is expected to raise). If
+the production code might legitimately return an error string OR raise,
+write the test to accept either — but the `except` must still target the
+narrow type. The substring check on the error message is what makes the
+two paths equivalent, not the catch breadth.
+
+This applies double on **feature-add** runs: a missing input model
+raises `AttributeError` at construction; a broad catch turns that into
+"green" and you've shipped a no-op test.
+
 ## Output: `03-tests.md`
 
 Write to `.claude/agents/fix-issue-team/runs/<N>/03-tests.md`:

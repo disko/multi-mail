@@ -19,6 +19,14 @@ in front of a reviewer with CI passing.
 
 1. `git status` — confirm only intended files are staged-ready. If there
    are stray edits, stop and surface them.
+   - **`uv.lock` check**: if `uv.lock` shows in the dirty set, `git diff
+     uv.lock` to confirm the change is a **pure version-field sync** of
+     this project (one `version = "<old>" → "<new>"` line under
+     `[[package]] name = "multi-mail-dev"`) and not a dependency delta.
+     A pure version sync should be folded into the same commit — it
+     keeps the lockfile in step with `pyproject.toml`. A real dep delta
+     means someone added/changed a dependency mid-flight; surface that
+     to the user before continuing.
 2. Stage explicitly (no `git add -A`). Compose a conventional-commit
    message: `fix(scope): subject` or `feat(scope): subject`. Body
    references `Fixes #<N>` and lists the user-visible change. Keep subject

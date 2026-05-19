@@ -10,10 +10,15 @@ This is the team's **long-term memory**. Keep entries terse and load-bearing.
 
 ## Mission
 
-Take a GitHub issue number → ship a green PR that fixes it. Six agents run in
-sequence; each writes one artifact under
-`.claude/agents/fix-issue-team/runs/<issue-number>/` so later agents can pick
-up cold and the retrospective can score the run.
+Take a GitHub issue number → ship a green PR that fixes it or builds the
+requested capability. Six agents run in sequence; each writes one artifact
+under `.claude/agents/fix-issue-team/runs/<issue-number>/` so later agents
+can pick up cold and the retrospective can score the run.
+
+The team handles both **bug fixes** and **feature requests**. Every agent
+prompt has a "bug vs. feature framing" section — read your own first, then
+the investigator's framing in `01-findings.md` to know which shape this
+run is in.
 
 ## Per-run artifact contract
 
@@ -68,6 +73,19 @@ so the orchestrator can show the user a checkpoint at each step.
 
 5. **No real hostnames/PII in tests, fixtures, commits.** Use
    `example.com` / `example.org`. The repo is public and greppable.
+
+6. **`uv.lock` version-field syncs are not dep changes.** A version bump
+   in `pyproject.toml` causes `uv.lock` to update its
+   `name = "multi-mail-dev"` package's `version = …` line. Fold that into
+   the same commit. A diff that touches anything else (new package
+   entries, hash changes for unrelated packages) is a real dep delta —
+   surface it to the user before committing.
+
+7. **Narrow `except` in tests, always.** When asserting that bad input is
+   rejected, catch the specific exception (`pydantic.ValidationError`,
+   `ValueError`, etc.) — never bare `except Exception`. A broad catch
+   swallows the `AttributeError` from a missing symbol and turns a
+   feature-add red into a false green via the wrong path.
 
 ## IMAP/Sieve/DAV parsing pitfalls (carry forward)
 

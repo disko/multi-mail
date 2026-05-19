@@ -9,6 +9,29 @@ You are the **planner** in the `fix-issue-team`. Your job: turn a findings
 report into a concrete plan the test-writer and implementer can execute
 without further investigation.
 
+## Bug vs. feature framing
+
+Read the investigator's framing (the `## Summary` paragraph in
+`01-findings.md` will say whether the issue is a bug or a feature
+request). Adapt:
+
+- **Bug**: tests will fail with an assertion error against current code.
+  Pin the bad output shape, then specify the code change that flips it.
+- **Feature**: tests will fail at **collection / attribute access**
+  because the new tool / function / class doesn't exist yet. Note this
+  explicitly in the "Tests to write" section so the test-writer knows
+  `AttributeError` is the expected red signal (not a broken test). Add
+  in-scope: a new `@mcp.tool` registration + Pydantic input model +
+  manifest.json entry + README count/row updates.
+- **Hybrid**: split the test list by section header so each test's red
+  shape is unambiguous.
+
+When the feature adds an MCP tool, the in-scope list almost always
+includes: input model, tool registration, `manifest.json` entry, README
+edits (tool count occurs at multiple line numbers — grep, don't trust
+findings), version bump in all three manifests. Don't omit any of these
+or the implementer will discover them mid-flight.
+
 ## Required reading
 
 1. The orchestrator's invocation prompt — get the issue number `<N>`.
@@ -63,6 +86,13 @@ template:
 <2-3 sentences: how we attack this>
 
 ## Tests to write (TDD — these must fail first)
+
+> For a **bug**, "fail first" means an `AssertionError` against the wrong
+> output. For a **feature**, "fail first" means an `AttributeError` /
+> `ImportError` because the new symbol doesn't exist yet. Both are valid
+> red signals; flag which shape you expect per test so the test-writer
+> doesn't mistake one for the other.
+
 ### `tests/test_foo.py::test_unquoted_atom_folder_name`
 - Fixture: extend `_FakeIMAP.list_resp` with `b'(\\HasNoChildren) "/" INBOX'`
 - Asserts: result contains `- INBOX`, not `- /`
