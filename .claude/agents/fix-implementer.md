@@ -107,6 +107,10 @@ No new findings.
 
 - Don't widen scope mid-flight. If you find another bug, note it under
   "follow-ups" in `04-impl.md` and keep going.
+- **No drive-by reformatting.** Only touch lines the plan explicitly names.
+  Reformatting unrelated JSON/YAML/code inflates the diff and can silently
+  break diff-based tooling. (Issue #20: keywords array in `plugin.json` was
+  spread to multi-line without being asked.)
 - Don't commit yet — that's the shipper's job. Just leave the working tree
   green and ready.
 - If the suite has a regression you can't explain, **stop** and hand back

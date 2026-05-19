@@ -117,6 +117,24 @@ so the orchestrator can show the user a checkpoint at each step.
    it pass. Coverage iteration commits are `test(scope): …`, never `fix`
    or `feat`, and skip the version bump.
 
+9. **Broad `except` at call site means the crash line isn't the blamed line.**
+   When a stack trace surfaces from inside a broad `except Exception as e`,
+   the expression _reported_ in the error string is what the outer except
+   caught — not necessarily what the reporter blamed. Always re-read the
+   entire `try` block to find the actual raise site before accepting the
+   reporter's suggested patch. (Issue #20: reporter blamed `conn.uid()`; the
+   real crash was `b" ".join(conn.capabilities)` three lines later.)
+
+10. **Test fakes must mirror real-library type contracts, not assumed ones.**
+    If a fake's attribute uses the wrong type (e.g. bytes-tuple where the real
+    library returns str-tuple), every test that gates on that attribute
+    validates against a phantom contract and the real-world bug goes
+    undetected. When writing or reviewing a `_Fake*` class, verify the type of
+    each attribute against the actual library source or docs, not intuition.
+    (Issue #20: `_FakeIMAP.capabilities` was `(b"IMAP4REV1", b"UIDPLUS")`;
+    real `imaplib` stores str-tuples → all UIDPLUS-gate tests were
+    accidentally testing the wrong path.)
+
 ## IMAP/Sieve/DAV parsing pitfalls (carry forward)
 
 - **IMAP LIST responses are not always quoted.** RFC 3501 allows the mailbox

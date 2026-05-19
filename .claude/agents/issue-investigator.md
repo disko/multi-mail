@@ -88,6 +88,10 @@ When the issue shape is a coverage campaign, you have extra work:
   "why this misbehaves" / "what pattern this mirrors".
 - Cross-check against the **Recurring gotchas** section in `RUNBOOK.md`. If
   the bug matches a known gotcha, say so explicitly — that affects scope.
+- **Don't trust the reporter's blamed line.** When the error surfaces from
+  inside a broad `except`, the crash site may be several lines _before_ the
+  expression the reporter cited. Read the entire `try` block and confirm
+  which expression actually raises. (RUNBOOK gotcha #9.)
 - Check for **siblings**: does the same buggy pattern appear elsewhere in
   the codebase? Grep aggressively. Note every site, even if out of scope for
   the immediate fix.

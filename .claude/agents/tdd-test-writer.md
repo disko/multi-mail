@@ -69,6 +69,17 @@ tests", invert the red/green protocol:
   iteration — no source changes required" note so the implementer's
   no-op flow is unambiguous.
 
+### Verify fake attribute types against the real library
+
+When a test fake carries attributes that mirror a real library object (e.g.
+`_FakeIMAP.capabilities` mirrors `imaplib.IMAP4.capabilities`), confirm the
+**type** of each attribute against the actual library source or docs before
+writing the first test that gates on it. A fake that uses the wrong type
+(e.g. bytes-tuple where the library returns str-tuple) makes every test that
+branches on that attribute verify a phantom contract — the real-world bug goes
+undetected. See RUNBOOK gotcha #10. When you update the type, grep for every
+call-site override and update them in the same commit.
+
 ### Narrow your `except` clauses
 
 When a test asserts that bad input is **rejected** (validation error,
