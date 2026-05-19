@@ -469,6 +469,53 @@ def _parse_imap_list_line(item: Any) -> Optional[str]:
     return tokens[-1]
 
 
+def _resolve_trash_folder(
+    conn: Any,
+    acct: Dict[str, Any],
+    override: Optional[str] = None,
+) -> str:
+    """Resolve the Trash folder name for a delete-to-trash workflow.
+
+    Priority chain:
+      1. ``override`` (per-tool-call ``trash_folder`` param).
+      2. ``acct['trash_folder']`` — per-account config. Treats explicit
+         ``None`` as missing (CLAUDE.md Gotcha #1: Pydantic serialises
+         ``Optional[str] = None`` as ``null``; ``dict.get(k, default)``
+         would return that ``None`` instead of the fallback).
+      3. ``\\Trash`` SPECIAL-USE flag from the server's LIST response
+         (RFC 6154). Substring-scan on the header bytes — the flag group
+         lives in the ``(\\HasNoChildren \\Trash) "/" "Name"`` prefix that
+         ``_parse_imap_list_line`` otherwise discards. Literal-form LIST
+         tuples (header bytes + literal name bytes) are out of scope here:
+         their flag group sits in the header tuple element which we don't
+         currently re-scan. Revisit if a user reports it.
+      4. Hard-coded default: ``"Trash"``.
+    """
+    if override:
+        return override
+    configured = acct.get("trash_folder")
+    if configured:
+        return configured
+    try:
+        status, data = conn.list()
+        if status == "OK" and data:
+            for item in data:
+                if isinstance(item, (bytes, bytearray)):
+                    text = bytes(item).decode("utf-8", errors="replace")
+                elif isinstance(item, tuple) and item and isinstance(item[0], (bytes, bytearray)):
+                    text = bytes(item[0]).decode("utf-8", errors="replace")
+                else:
+                    continue
+                if "\\Trash" in text:
+                    name = _parse_imap_list_line(item)
+                    if name:
+                        return name
+    except Exception:
+        # Graceful degradation — pinned by the hardcoded-fallback test.
+        pass
+    return "Trash"
+
+
 # ---------------------------------------------------------------------------
 # Pydantic input models
 # ---------------------------------------------------------------------------
@@ -549,6 +596,46 @@ class MoveEmailInput(AccountIdMixin):
     uid: str = Field(..., description="UID of the message to move", min_length=1)
     source_folder: str = Field(default="INBOX", description="Current folder")
     dest_folder: str = Field(..., description="Destination folder", min_length=1)
+
+
+class DeleteEmailInput(AccountIdMixin):
+    """Input for deleting a message — move to Trash by default, permanent if flagged."""
+    uid: str = Field(..., description="UID of the message to delete", min_length=1)
+    folder: str = Field(default="INBOX", description="Folder containing the message")
+    permanent: bool = Field(
+        default=False,
+        description=(
+            "If True: STORE +\\Deleted + UID EXPUNGE in the source folder. "
+            "If False (default): COPY to the resolved Trash folder, then "
+            "STORE +\\Deleted + UID EXPUNGE on the original."
+        ),
+    )
+    trash_folder: Optional[str] = Field(
+        default=None,
+        description=(
+            "Override trash folder name. If unset: per-account "
+            "`trash_folder` config → SPECIAL-USE \\Trash → 'Trash'."
+        ),
+    )
+
+
+class ExpungeInput(AccountIdMixin):
+    """Input for issuing a (UID-scoped or bare) EXPUNGE on an IMAP folder."""
+    uid: Optional[str] = Field(
+        default=None,
+        description=(
+            "UID to expunge (requires UIDPLUS). If unset, requires "
+            "confirm_bare_expunge=True."
+        ),
+    )
+    folder: str = Field(default="INBOX", description="Folder to operate on")
+    confirm_bare_expunge: bool = Field(
+        default=False,
+        description=(
+            "Required to issue a bare EXPUNGE (no UID). A bare EXPUNGE "
+            "removes EVERY \\Deleted message in the folder."
+        ),
+    )
 
 
 # Characters that may not appear inside an IMAP flag atom (RFC 3501 §9
@@ -641,6 +728,7 @@ class AddAccountInput(BaseModel):
     smtp_port: int = Field(default=587, description="SMTP port", ge=1, le=65535)
     smtp_security: str = Field(default="starttls", description="SMTP security: 'ssl', 'starttls', or 'none'")
     smtp_allow_insecure: bool = Field(default=False, description="Skip TLS certificate verification for SMTP")
+    trash_folder: Optional[str] = Field(default=None, description="Override server-side Trash folder name (falls back to SPECIAL-USE \\Trash, then 'Trash')")
     sieve_host: Optional[str] = Field(default=None, description="ManageSieve server hostname (defaults to IMAP host)")
     sieve_port: int = Field(default=4190, description="ManageSieve port", ge=1, le=65535)
     sieve_security: str = Field(default="starttls", description="ManageSieve security: 'starttls' or 'none'")
@@ -1968,6 +2056,159 @@ async def email_move_message(params: MoveEmailInput) -> str:
 
 
 @mcp.tool(
+    name="email_delete_message",
+    annotations={
+        "title": "Delete Email (Move to Trash or Permanent)",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def email_delete_message(params: DeleteEmailInput) -> str:
+    """Delete a message — move it to Trash (default) or expunge permanently.
+
+    Default (``permanent=False``): COPY the message to the resolved Trash
+    folder, then STORE ``\\Deleted`` and ``UID EXPUNGE`` on the original.
+    The Trash folder is resolved in priority order: explicit
+    ``trash_folder`` param → per-account ``trash_folder`` config →
+    SPECIAL-USE ``\\Trash`` flag on a LIST response (RFC 6154) →
+    hard-coded ``"Trash"`` literal. If the COPY returns ``TRYCREATE``
+    (folder does not exist), the tool creates the target and retries once.
+
+    With ``permanent=True``: STORE ``\\Deleted`` + ``UID EXPUNGE`` only —
+    no copy hop. Both paths require UIDPLUS; without it, the tool refuses
+    and rolls back the ``\\Deleted`` flag on the permanent path rather
+    than risk an untargeted EXPUNGE removing the user's other flagged
+    messages.
+
+    Args:
+        params: account_id, uid, folder (default INBOX), permanent
+            (default False), trash_folder (optional override).
+
+    Returns:
+        Confirmation string naming UID + destination, or an ``Error: …``
+        message on failure.
+    """
+    def _impl():
+        try:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
+            try:
+                conn.select(params.folder)
+                caps = b" ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else b""
+                uidplus = b"UIDPLUS" in caps
+                if params.permanent:
+                    # STORE \Deleted, then UID EXPUNGE (gated by UIDPLUS).
+                    conn.uid("STORE", params.uid, "+FLAGS", "(\\Deleted)")
+                    if not uidplus:
+                        # Roll back the \Deleted flag so another client's
+                        # untargeted EXPUNGE can't pick it up either.
+                        conn.uid("STORE", params.uid, "-FLAGS", "(\\Deleted)")
+                        return (
+                            f"Error: server does not advertise UIDPLUS capability; "
+                            f"refusing to issue an untargeted EXPUNGE. Message UID "
+                            f"{params.uid} was left untouched in {params.folder} "
+                            f"(its \\Deleted flag has been cleared)."
+                        )
+                    conn.uid("EXPUNGE", params.uid)
+                    return f"Message UID {params.uid} permanently deleted from {params.folder}."
+                # Move-to-trash path: resolve trash, COPY (auto-create on
+                # TRYCREATE), STORE \Deleted, UID EXPUNGE.
+                if not uidplus:
+                    return (
+                        f"Error: server does not advertise UIDPLUS capability; "
+                        f"refusing to issue an untargeted EXPUNGE. Message UID "
+                        f"{params.uid} was left untouched in {params.folder}."
+                    )
+                trash = _resolve_trash_folder(conn, acct, params.trash_folder)
+                status, data = conn.uid("COPY", params.uid, trash)
+                if status == "NO" and data and any(
+                    isinstance(d, (bytes, bytearray)) and b"TRYCREATE" in bytes(d).upper()
+                    for d in data
+                ):
+                    conn.create(trash)
+                    status, data = conn.uid("COPY", params.uid, trash)
+                if status != "OK":
+                    return f"Error deleting message: {data}"
+                conn.uid("STORE", params.uid, "+FLAGS", "(\\Deleted)")
+                conn.uid("EXPUNGE", params.uid)
+                return f"Message UID {params.uid} moved from {params.folder} to {trash} (Trash)."
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error deleting message: {e}"
+    return await asyncio.to_thread(_impl)
+
+
+@mcp.tool(
+    name="email_expunge",
+    annotations={
+        "title": "Expunge \\Deleted Messages",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def email_expunge(params: ExpungeInput) -> str:
+    """Expunge messages already marked ``\\Deleted`` from a folder.
+
+    Two modes: (1) UID-scoped — supply ``uid`` to expunge just that
+    message (requires UIDPLUS). (2) Bare expunge — omit ``uid`` and pass
+    ``confirm_bare_expunge=True`` to remove EVERY ``\\Deleted`` message
+    in the folder. The tool itself does not mark anything ``\\Deleted``;
+    compose with ``email_modify_flags`` first to mark, then call this to
+    expunge. Use ``email_delete_message`` for the simpler one-shot
+    trash/permanent workflow.
+
+    Args:
+        params: account_id, folder (default INBOX), optional uid,
+            confirm_bare_expunge (required when uid is unset).
+
+    Returns:
+        Confirmation message, or an ``Error: …`` string on refusal/failure.
+    """
+    def _impl():
+        try:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
+            try:
+                conn.select(params.folder)
+                caps = b" ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else b""
+                if params.uid:
+                    if b"UIDPLUS" not in caps:
+                        return (
+                            f"Error: server does not advertise UIDPLUS capability; "
+                            f"refusing to issue an untargeted EXPUNGE. UID "
+                            f"{params.uid} was left untouched in {params.folder}."
+                        )
+                    status, data = conn.uid("EXPUNGE", params.uid)
+                    if status != "OK":
+                        return f"Error expunging: {data}"
+                    return f"Expunged UID {params.uid} from {params.folder}."
+                if not params.confirm_bare_expunge:
+                    return (
+                        f"Error: a bare EXPUNGE removes every \\Deleted message in "
+                        f"{params.folder}. Pass confirm_bare_expunge=True to proceed, "
+                        f"or supply a uid for a scoped expunge."
+                    )
+                conn.expunge()
+                return f"Bare EXPUNGE issued on {params.folder}."
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error expunging: {e}"
+    return await asyncio.to_thread(_impl)
+
+
+@mcp.tool(
     name="email_modify_flags",
     annotations={
         "title": "Modify IMAP Message Flags",
@@ -1985,7 +2226,8 @@ async def email_modify_flags(params: ModifyFlagsInput) -> str:
     system flags (``\\Flagged``, ``\\Seen``, ``\\Answered``, ``\\Draft``)
     and bare custom keywords (``follow-up``). The tool does NOT expunge —
     setting ``\\Deleted`` here will mark the message but leave it in
-    place; use ``email_move_message`` for the move-and-delete workflow.
+    place; use ``email_delete_message`` for the trash/permanent workflow
+    or ``email_expunge`` to remove already-flagged messages.
 
     Args:
         params: account_id, uid, folder (default INBOX), add_flags,

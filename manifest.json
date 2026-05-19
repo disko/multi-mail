@@ -2,9 +2,9 @@
   "manifest_version": "0.2",
   "name": "multi-mail",
   "display_name": "Multi mail",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "description": "Connect to multiple self-hosted mail servers — IMAP, SMTP, Sieve filters, CalDAV calendars, and CardDAV contacts",
-  "long_description": "Multi-mail exposes 32 MCP tools for IMAP/SMTP email, ManageSieve filters, CalDAV calendars, and CardDAV contacts. Supports multiple accounts, autodiscovery, SSRF-guarded DAV requests, and TLS-verified network access. Account configuration is stored in ~/.claude/multi-mail-accounts.json.",
+  "long_description": "Multi-mail exposes 34 MCP tools for IMAP/SMTP email, ManageSieve filters, CalDAV calendars, and CardDAV contacts. Supports multiple accounts, autodiscovery, SSRF-guarded DAV requests, and TLS-verified network access. Account configuration is stored in ~/.claude/multi-mail-accounts.json.",
   "author": {
     "name": "disko",
     "url": "https://github.com/disko"
@@ -43,6 +43,8 @@
     { "name": "email_forward", "description": "Forward a message" },
     { "name": "email_move_message", "description": "Move between folders" },
     { "name": "email_modify_flags", "description": "Add or remove IMAP flags (\\Flagged, \\Seen, \\Answered, custom keywords)" },
+    { "name": "email_delete_message", "description": "Delete a message (move to Trash by default, or permanent with UIDPLUS-scoped EXPUNGE)" },
+    { "name": "email_expunge", "description": "Expunge \\Deleted messages from a folder (UID-scoped or bare with explicit confirmation)" },
     { "name": "email_sieve_list", "description": "List Sieve filter scripts" },
     { "name": "email_sieve_get", "description": "Retrieve a script's content" },
     { "name": "email_sieve_put", "description": "Upload (create/replace) a Sieve script" },
