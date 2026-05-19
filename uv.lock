@@ -838,7 +838,7 @@ wheels = [
 
 [[package]]
 name = "multi-mail-dev"
-version = "0.3.14"
+version = "0.3.15"
 source = { virtual = "." }
 
 [package.dev-dependencies]
