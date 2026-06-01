@@ -9,6 +9,7 @@ fallback never fires. See CLAUDE.md "Recurring gotchas".
 Bug already fixed once in ``email_list_accounts`` (line 1139); this test pins
 the remaining six sibling sites so the fix can't regress.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,6 +42,7 @@ ACCT = {
 
 
 # --- Minimal fakes for each integration seam ------------------------------
+
 
 def _msg_bytes():
     msg = email.mime.text.MIMEText("body", "plain", "utf-8")
@@ -116,6 +118,7 @@ class _StubClient:
 
 # --- Fixtures -------------------------------------------------------------
 
+
 @pytest.fixture
 def stubbed(monkeypatch):
     """Install null-display-name account + happy-path stubs for every seam."""
@@ -123,10 +126,14 @@ def stubbed(monkeypatch):
     monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: _StubIMAP())
     monkeypatch.setattr(email_mcp, "_sieve_connect", lambda acct: _StubSieve())
     monkeypatch.setattr(email_mcp, "_caldav_client", lambda acct: _StubClient())
-    monkeypatch.setattr(email_mcp, "_get_calendar", lambda acct, name=None: _StubCalendar())
+    monkeypatch.setattr(
+        email_mcp, "_get_calendar", lambda acct, name=None: _StubCalendar()
+    )
 
     async def fake_propfind(acct):
-        return [{"name": "Personal", "href": "https://dav.example.com/dav/abooks/personal/"}]
+        return [
+            {"name": "Personal", "href": "https://dav.example.com/dav/abooks/personal/"}
+        ]
 
     monkeypatch.setattr(email_mcp, "_carddav_propfind", fake_propfind)
 
@@ -190,5 +197,9 @@ def test_headings_use_account_id_when_display_name_is_none(stubbed, label, make_
     rendered output.
     """
     result = run(make_coro())
-    assert ACCT_ID in result, f"{label}: expected account_id '{ACCT_ID}' in heading, got: {result!r}"
-    assert "None" not in result, f"{label}: literal 'None' leaked into output: {result!r}"
+    assert ACCT_ID in result, (
+        f"{label}: expected account_id '{ACCT_ID}' in heading, got: {result!r}"
+    )
+    assert "None" not in result, (
+        f"{label}: literal 'None' leaked into output: {result!r}"
+    )

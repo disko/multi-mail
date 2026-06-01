@@ -5,12 +5,11 @@ assembly and SMTP/IMAP fan-out.
 with mocked _smtp_connect / _imap_connect so we cover the recipient-list
 construction and the auto-save-to-Sent fallback without touching the network.
 """
+
 from __future__ import annotations
 
-import email
 import importlib.util
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -39,6 +38,7 @@ ACCT = {
 # ---------------------------------------------------------------------------
 # _build_message
 # ---------------------------------------------------------------------------
+
 
 def test_build_message_minimal_headers():
     msg = _build_message(ACCT, "alice@example.com", "Hi", "hello")
@@ -100,6 +100,7 @@ def test_build_message_unique_message_id_per_call():
 # _send_message — recipient list + SMTP/IMAP fan-out (mocked)
 # ---------------------------------------------------------------------------
 
+
 class _FakeSMTP:
     def __init__(self):
         self.sendmail_calls = []
@@ -151,7 +152,9 @@ def test_send_message_collects_to_recipients(fakes):
 
 def test_send_message_includes_cc_in_recipients(fakes):
     smtp, _ = fakes
-    msg = _build_message(ACCT, "alice@example.com", "S", "body", cc="cc1@example.com, cc2@example.com")
+    msg = _build_message(
+        ACCT, "alice@example.com", "S", "body", cc="cc1@example.com, cc2@example.com"
+    )
     _send_message(ACCT, msg)
     _, recipients, _ = smtp.sendmail_calls[0]
     assert recipients == ["alice@example.com", "cc1@example.com", "cc2@example.com"]

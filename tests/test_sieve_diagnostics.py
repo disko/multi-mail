@@ -4,6 +4,7 @@ When a ManageSieve connection fails — bad credentials, missing STARTTLS,
 no SASL mechanisms advertised — the error must include enough context that
 the user can fix their account config without reading the library source.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -65,7 +66,9 @@ class _FakeMS:
         return self._login_result
 
 
-def _patch_ms(monkeypatch, *, loginmechs=("PLAIN",), login_result="OK", login_raises=None):
+def _patch_ms(
+    monkeypatch, *, loginmechs=("PLAIN",), login_result="OK", login_raises=None
+):
     """Monkeypatch email_mcp.ms.MANAGESIEVE (and its .error class) for one test."""
     _FakeMS.instances = []
     _FakeMS._next_loginmechs = list(loginmechs)
@@ -84,6 +87,7 @@ def _stub_account(monkeypatch, **acct_overrides):
 # ---------------------------------------------------------------------------
 # loginmechs empty → ConnectionError with context
 # ---------------------------------------------------------------------------
+
 
 def test_empty_loginmechs_raises_with_full_context(monkeypatch):
     """Empty mechanism list must surface security mode + host:port + a hint."""
@@ -131,6 +135,7 @@ def test_empty_loginmechs_no_starttls_hint_when_already_starttls(monkeypatch):
 # login returns NO → ConnectionError with context + credentials hint
 # ---------------------------------------------------------------------------
 
+
 def test_login_returning_no_surfaces_credentials_hint(monkeypatch):
     acct = _stub_account(monkeypatch)
     _patch_ms(monkeypatch, loginmechs=["PLAIN"], login_result="NO")
@@ -148,6 +153,7 @@ def test_login_returning_no_surfaces_credentials_hint(monkeypatch):
 # ---------------------------------------------------------------------------
 # login raises managesieve.error → wrapped with context
 # ---------------------------------------------------------------------------
+
 
 def test_login_raising_managesieve_error_is_wrapped(monkeypatch):
     acct = _stub_account(monkeypatch)
@@ -168,6 +174,7 @@ def test_login_raising_managesieve_error_is_wrapped(monkeypatch):
 # ---------------------------------------------------------------------------
 # Happy path still returns the connection unchanged
 # ---------------------------------------------------------------------------
+
 
 def test_successful_login_returns_connection(monkeypatch):
     acct = _stub_account(monkeypatch)

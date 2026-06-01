@@ -11,6 +11,7 @@ mailbox side; a ``_FakeSMTP`` to capture the outbound message; ``CONFIG_PATH``
 monkeypatched to a tmp file so ``_save_accounts`` / ``_load_accounts`` round
 trip through real disk.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -43,9 +44,16 @@ ACCT = {
 }
 
 
-def _msg_bytes(*, frm="alice@example.com", to="me@example.com",
-               cc="", subject="invoice", body="please pay",
-               message_id="<orig@example.com>", references=""):
+def _msg_bytes(
+    *,
+    frm="alice@example.com",
+    to="me@example.com",
+    cc="",
+    subject="invoice",
+    body="please pay",
+    message_id="<orig@example.com>",
+    references="",
+):
     msg = email.mime.text.MIMEText(body, "plain", "utf-8")
     msg["From"] = frm
     msg["To"] = to
@@ -60,8 +68,13 @@ def _msg_bytes(*, frm="alice@example.com", to="me@example.com",
 
 
 class _FakeIMAP:
-    def __init__(self, *, fetch_bodies=None, capabilities=("IMAP4REV1", "UIDPLUS"),
-                 list_resp=None):
+    def __init__(
+        self,
+        *,
+        fetch_bodies=None,
+        capabilities=("IMAP4REV1", "UIDPLUS"),
+        list_resp=None,
+    ):
         self.fetch_bodies = fetch_bodies or {}
         self.capabilities = capabilities
         self.selected = None
@@ -73,11 +86,15 @@ class _FakeIMAP:
         self.bare_expunged = False
         self.logged_out = False
         # RFC 6154 SPECIAL-USE LIST response; default advertises \Trash on "Trash".
-        self.list_resp = list_resp if list_resp is not None else [
-            b'(\\HasNoChildren) "/" "INBOX"',
-            b'(\\HasNoChildren \\Trash) "/" "Trash"',
-            b'(\\HasNoChildren \\Sent) "/" "Sent"',
-        ]
+        self.list_resp = (
+            list_resp
+            if list_resp is not None
+            else [
+                b'(\\HasNoChildren) "/" "INBOX"',
+                b'(\\HasNoChildren \\Trash) "/" "Trash"',
+                b'(\\HasNoChildren \\Sent) "/" "Sent"',
+            ]
+        )
 
     def select(self, folder, readonly=False):
         self.selected = (folder, readonly)
@@ -172,6 +189,7 @@ def _decoded_body(wire):
 # email_add_account — write to disk, dedupe by id
 # ---------------------------------------------------------------------------
 
+
 def _input_kwargs(**overrides):
     base = dict(
         id="acct1",
@@ -189,9 +207,11 @@ def test_add_account_persists_to_disk(tmp_path, monkeypatch):
     config = tmp_path / "accounts.json"
     monkeypatch.setattr(email_mcp, "CONFIG_PATH", str(config))
 
-    result = run(email_mcp.email_add_account(
-        email_mcp.AddAccountInput(**_input_kwargs(id="first"))
-    ))
+    result = run(
+        email_mcp.email_add_account(
+            email_mcp.AddAccountInput(**_input_kwargs(id="first"))
+        )
+    )
     assert "added successfully" in result
     data = json.loads(config.read_text())
     ids = [a["id"] for a in data["accounts"]]
@@ -202,12 +222,18 @@ def test_add_account_rejects_duplicate_id(tmp_path, monkeypatch):
     config = tmp_path / "accounts.json"
     monkeypatch.setattr(email_mcp, "CONFIG_PATH", str(config))
 
-    run(email_mcp.email_add_account(
-        email_mcp.AddAccountInput(**_input_kwargs(id="dup"))
-    ))
-    result = run(email_mcp.email_add_account(
-        email_mcp.AddAccountInput(**_input_kwargs(id="dup", email_address="other@example.com"))
-    ))
+    run(
+        email_mcp.email_add_account(
+            email_mcp.AddAccountInput(**_input_kwargs(id="dup"))
+        )
+    )
+    result = run(
+        email_mcp.email_add_account(
+            email_mcp.AddAccountInput(
+                **_input_kwargs(id="dup", email_address="other@example.com")
+            )
+        )
+    )
     assert "already exists" in result
     data = json.loads(config.read_text())
     assert len(data["accounts"]) == 1  # second add did not append
@@ -217,12 +243,15 @@ def test_add_account_rejects_duplicate_id(tmp_path, monkeypatch):
 # email_create_folder / email_delete_folder
 # ---------------------------------------------------------------------------
 
+
 def test_create_folder_forwards_name_to_imap(stub_account, monkeypatch):
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_create_folder(
-        email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="Archive/2026")
-    ))
+    result = run(
+        email_mcp.email_create_folder(
+            email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="Archive/2026")
+        )
+    )
     assert imap.created == ["Archive/2026"]
     assert "created" in result.lower()
     assert imap.logged_out
@@ -231,9 +260,11 @@ def test_create_folder_forwards_name_to_imap(stub_account, monkeypatch):
 def test_delete_folder_forwards_name_to_imap(stub_account, monkeypatch):
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_delete_folder(
-        email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="Old/2020")
-    ))
+    result = run(
+        email_mcp.email_delete_folder(
+            email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="Old/2020")
+        )
+    )
     assert imap.deleted == ["Old/2020"]
     assert "deleted" in result.lower()
 
@@ -242,16 +273,21 @@ def test_delete_folder_forwards_name_to_imap(stub_account, monkeypatch):
 # email_move_message — UIDPLUS path vs refusal
 # ---------------------------------------------------------------------------
 
+
 def test_move_uses_uid_expunge_when_uidplus_supported(stub_account, monkeypatch):
     imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_move_message(
-        email_mcp.MoveEmailInput(
-            account_id=ACCT_ID, uid="42",
-            source_folder="INBOX", dest_folder="Archive",
+    result = run(
+        email_mcp.email_move_message(
+            email_mcp.MoveEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                source_folder="INBOX",
+                dest_folder="Archive",
+            )
         )
-    ))
+    )
     assert imap.copied == [("42", "Archive")]
     assert imap.uid_expunges == ["42"]
     assert imap.bare_expunged is False  # NEVER bare EXPUNGE
@@ -264,12 +300,16 @@ def test_move_refuses_and_clears_deleted_when_no_uidplus(stub_account, monkeypat
     imap = _FakeIMAP(capabilities=("IMAP4REV1",))  # no UIDPLUS
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_move_message(
-        email_mcp.MoveEmailInput(
-            account_id=ACCT_ID, uid="99",
-            source_folder="INBOX", dest_folder="Archive",
+    result = run(
+        email_mcp.email_move_message(
+            email_mcp.MoveEmailInput(
+                account_id=ACCT_ID,
+                uid="99",
+                source_folder="INBOX",
+                dest_folder="Archive",
+            )
         )
-    ))
+    )
     assert imap.copied == [("99", "Archive")]
     # First +FLAGS \Deleted then -FLAGS \Deleted to roll back
     flag_ops = [s for s in imap.stores if s[0] == "99"]
@@ -285,16 +325,26 @@ def test_move_refuses_and_clears_deleted_when_no_uidplus(stub_account, monkeypat
 # email_reply
 # ---------------------------------------------------------------------------
 
+
 def test_reply_sets_threading_headers(stub_account, monkeypatch, fake_smtp):
-    original = _msg_bytes(message_id="<orig@example.com>", references="<root@example.com>")
+    original = _msg_bytes(
+        message_id="<orig@example.com>", references="<root@example.com>"
+    )
     imap = _FakeIMAP(fetch_bodies={"5": original})
     _install_imap(monkeypatch, imap)
     # Reuse the smtp fixture by re-installing (fake_smtp re-points _imap_connect)
     monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: imap)
 
-    result = run(email_mcp.email_reply(email_mcp.ReplyEmailInput(
-        account_id=ACCT_ID, uid="5", body="thanks", reply_all=False,
-    )))
+    result = run(
+        email_mcp.email_reply(
+            email_mcp.ReplyEmailInput(
+                account_id=ACCT_ID,
+                uid="5",
+                body="thanks",
+                reply_all=False,
+            )
+        )
+    )
     assert "Reply sent to" in result
     _, recipients, wire = fake_smtp.sendmail_calls[0]
     assert "alice@example.com" in recipients[0]
@@ -314,9 +364,16 @@ def test_reply_all_includes_orig_cc_minus_self(stub_account, monkeypatch, fake_s
     imap = _FakeIMAP(fetch_bodies={"5": original})
     monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: imap)
 
-    run(email_mcp.email_reply(email_mcp.ReplyEmailInput(
-        account_id=ACCT_ID, uid="5", body="...", reply_all=True,
-    )))
+    run(
+        email_mcp.email_reply(
+            email_mcp.ReplyEmailInput(
+                account_id=ACCT_ID,
+                uid="5",
+                body="...",
+                reply_all=True,
+            )
+        )
+    )
 
     _, recipients, _ = fake_smtp.sendmail_calls[0]
     # Primary recipient = Reply-To/From (alice)
@@ -334,9 +391,16 @@ def test_reply_prefixes_subject_only_when_needed(stub_account, monkeypatch, fake
     imap = _FakeIMAP(fetch_bodies={"1": original})
     monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: imap)
 
-    run(email_mcp.email_reply(email_mcp.ReplyEmailInput(
-        account_id=ACCT_ID, uid="1", body="ack", reply_all=False,
-    )))
+    run(
+        email_mcp.email_reply(
+            email_mcp.ReplyEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                body="ack",
+                reply_all=False,
+            )
+        )
+    )
     _, _, wire = fake_smtp.sendmail_calls[0]
     # Exactly one "Re:" — not "Re: Re: thread"
     assert "Subject: Re: thread" in wire
@@ -347,17 +411,28 @@ def test_reply_prefixes_subject_only_when_needed(stub_account, monkeypatch, fake
 # email_forward
 # ---------------------------------------------------------------------------
 
-def test_forward_includes_quoted_original_and_fwd_subject(stub_account, monkeypatch, fake_smtp):
+
+def test_forward_includes_quoted_original_and_fwd_subject(
+    stub_account, monkeypatch, fake_smtp
+):
     original = _msg_bytes(
-        frm="alice@example.com", subject="status", body="all green",
+        frm="alice@example.com",
+        subject="status",
+        body="all green",
     )
     imap = _FakeIMAP(fetch_bodies={"7": original})
     monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: imap)
 
-    result = run(email_mcp.email_forward(email_mcp.ForwardEmailInput(
-        account_id=ACCT_ID, uid="7", to="team@example.com",
-        body="fyi",
-    )))
+    result = run(
+        email_mcp.email_forward(
+            email_mcp.ForwardEmailInput(
+                account_id=ACCT_ID,
+                uid="7",
+                to="team@example.com",
+                body="fyi",
+            )
+        )
+    )
     _, recipients, wire = fake_smtp.sendmail_calls[0]
     assert "team@example.com" in recipients
     body = _decoded_body(wire)
@@ -376,9 +451,15 @@ def test_forward_does_not_double_fwd_prefix(stub_account, monkeypatch, fake_smtp
     imap = _FakeIMAP(fetch_bodies={"1": original})
     monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: imap)
 
-    run(email_mcp.email_forward(email_mcp.ForwardEmailInput(
-        account_id=ACCT_ID, uid="1", to="team@example.com",
-    )))
+    run(
+        email_mcp.email_forward(
+            email_mcp.ForwardEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                to="team@example.com",
+            )
+        )
+    )
     _, _, wire = fake_smtp.sendmail_calls[0]
     assert "Subject: Fwd: status" in wire
     assert "Fwd: Fwd:" not in wire
@@ -395,15 +476,20 @@ def test_forward_does_not_double_fwd_prefix(stub_account, monkeypatch, fake_smtp
 # tuple shape that the new tool must produce.
 # ---------------------------------------------------------------------------
 
+
 def test_modify_flags_add_only_issues_plus_store(stub_account, monkeypatch):
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="42", add_flags=["\\Flagged"],
+    result = run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="42",
+                add_flags=["\\Flagged"],
+            )
         )
-    ))
+    )
 
     assert imap.selected == ("INBOX", False)
     assert imap.stores == [("42", "+FLAGS", "(\\Flagged)")]
@@ -415,11 +501,15 @@ def test_modify_flags_remove_only_issues_minus_store(stub_account, monkeypatch):
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="42", remove_flags=["\\Flagged"],
+    result = run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="42",
+                remove_flags=["\\Flagged"],
+            )
         )
-    ))
+    )
 
     assert imap.selected == ("INBOX", False)
     assert imap.stores == [("42", "-FLAGS", "(\\Flagged)")]
@@ -431,13 +521,16 @@ def test_modify_flags_add_and_remove_in_one_call(stub_account, monkeypatch):
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
 
-    run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="7",
-            add_flags=["\\Answered"],
-            remove_flags=["\\Flagged", "\\Seen"],
+    run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="7",
+                add_flags=["\\Answered"],
+                remove_flags=["\\Flagged", "\\Seen"],
+            )
         )
-    ))
+    )
 
     # Adds must precede removes — contract pinned here so callers
     # (and the implementer) can rely on a deterministic order.
@@ -451,16 +544,24 @@ def test_modify_flags_idempotent_reapply(stub_account, monkeypatch):
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
 
-    r1 = run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="42", add_flags=["\\Flagged"],
+    r1 = run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="42",
+                add_flags=["\\Flagged"],
+            )
         )
-    ))
-    r2 = run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="42", add_flags=["\\Flagged"],
+    )
+    r2 = run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="42",
+                add_flags=["\\Flagged"],
+            )
         )
-    ))
+    )
 
     # Both calls reach STORE with no pre-fetch / current-flags lookup.
     assert imap.stores == [
@@ -474,25 +575,35 @@ def test_modify_flags_respects_folder_argument(stub_account, monkeypatch):
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
 
-    run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="3",
-            folder="Archive", add_flags=["\\Flagged"],
+    run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="3",
+                folder="Archive",
+                add_flags=["\\Flagged"],
+            )
         )
-    ))
+    )
 
     assert imap.selected == ("Archive", False)
 
 
-def test_modify_flags_custom_keyword_passes_through_unprefixed(stub_account, monkeypatch):
+def test_modify_flags_custom_keyword_passes_through_unprefixed(
+    stub_account, monkeypatch
+):
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
 
-    run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="9", add_flags=["follow-up"],
+    run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="9",
+                add_flags=["follow-up"],
+            )
         )
-    ))
+    )
 
     assert imap.stores == [("9", "+FLAGS", "(follow-up)")]
 
@@ -506,9 +617,11 @@ def test_modify_flags_rejects_empty_payload(stub_account, monkeypatch):
     from pydantic import ValidationError
 
     try:
-        result = run(email_mcp.email_modify_flags(
-            email_mcp.ModifyFlagsInput(account_id=ACCT_ID, uid="1")
-        ))
+        result = run(
+            email_mcp.email_modify_flags(
+                email_mcp.ModifyFlagsInput(account_id=ACCT_ID, uid="1")
+            )
+        )
     except ValidationError as e:
         # Pydantic ValidationError path — empty payload rejected at
         # model construction time.
@@ -517,8 +630,10 @@ def test_modify_flags_rejects_empty_payload(stub_account, monkeypatch):
     else:
         # Runtime-check path — tool returns an error string.
         low = result.lower()
-        assert "at least one" in low or "nothing to do" in low or (
-            "error" in low and "flag" in low
+        assert (
+            "at least one" in low
+            or "nothing to do" in low
+            or ("error" in low and "flag" in low)
         )
 
     assert imap.stores == []
@@ -535,12 +650,15 @@ def test_modify_flags_rejects_invalid_flag_atom(stub_account, monkeypatch):
     from pydantic import ValidationError
 
     def _attempt():
-        return run(email_mcp.email_modify_flags(
-            email_mcp.ModifyFlagsInput(
-                account_id=ACCT_ID, uid="1",
-                add_flags=["bad flag with spaces"],
+        return run(
+            email_mcp.email_modify_flags(
+                email_mcp.ModifyFlagsInput(
+                    account_id=ACCT_ID,
+                    uid="1",
+                    add_flags=["bad flag with spaces"],
+                )
             )
-        ))
+        )
 
     try:
         result = _attempt()
@@ -566,11 +684,15 @@ def test_modify_flags_handles_imap_store_failure(stub_account, monkeypatch):
     imap = _DenyingIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="1", add_flags=["\\Flagged"],
+    result = run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="1",
+                add_flags=["\\Flagged"],
+            )
         )
-    ))
+    )
 
     assert result.lower().startswith("error")
     assert "PERMISSION DENIED" in result or "permission denied" in result.lower()
@@ -580,13 +702,18 @@ def test_modify_flags_handles_imap_store_failure(stub_account, monkeypatch):
 def test_modify_flags_unknown_account_returns_error(monkeypatch):
     def _missing(aid):
         raise ValueError(f"Account '{aid}' not found. Use email_list_accounts.")
+
     monkeypatch.setattr(email_mcp, "_get_account", _missing)
 
-    result = run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id="nope", uid="1", add_flags=["\\Flagged"],
+    result = run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id="nope",
+                uid="1",
+                add_flags=["\\Flagged"],
+            )
         )
-    ))
+    )
 
     assert result.lower().startswith("error")
     assert "not found" in result.lower()
@@ -606,12 +733,16 @@ def test_modify_flags_remove_store_failure_returns_error_after_add_succeeded(
     imap = _RemoveFailingIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="9",
-            add_flags=["\\Seen"], remove_flags=["\\Flagged"],
+    result = run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="9",
+                add_flags=["\\Seen"],
+                remove_flags=["\\Flagged"],
+            )
         )
-    ))
+    )
 
     assert result.lower().startswith("error updating flags")
     assert "QUOTA" in result
@@ -632,11 +763,15 @@ def test_modify_flags_swallows_logout_exception(stub_account, monkeypatch):
     imap = _LogoutBoomIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_modify_flags(
-        email_mcp.ModifyFlagsInput(
-            account_id=ACCT_ID, uid="1", add_flags=["\\Seen"],
+    result = run(
+        email_mcp.email_modify_flags(
+            email_mcp.ModifyFlagsInput(
+                account_id=ACCT_ID,
+                uid="1",
+                add_flags=["\\Seen"],
+            )
         )
-    ))
+    )
 
     assert "Flags updated" in result
     assert "hung up" not in result.lower()
@@ -647,6 +782,7 @@ def test_modify_flags_swallows_logout_exception(stub_account, monkeypatch):
 # _validate_flag_atom unit tests — direct invocation covers defensive branches
 # that pydantic's List[str] type would otherwise prevent reaching.
 # ---------------------------------------------------------------------------
+
 
 def test_validate_flag_atom_rejects_non_string():
     # Defensive isinstance check (line 568) is unreachable through the
@@ -687,17 +823,24 @@ def test_validate_flag_atom_rejects_bare_backslash():
 
 # ----------------------------- Group A: delete-to-trash path -----------------
 
-def test_delete_message_default_moves_to_trash_via_special_use(stub_account, monkeypatch):
+
+def test_delete_message_default_moves_to_trash_via_special_use(
+    stub_account, monkeypatch
+):
     """Default ``permanent=False`` resolves Trash via SPECIAL-USE LIST, COPY+
     STORE+UID EXPUNGE on the source folder. UIDPLUS available."""
     imap = _FakeIMAP()  # default list_resp advertises \Trash on "Trash"
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+            )
         )
-    ))
+    )
 
     assert imap.copied == [("42", "Trash")]
     assert ("42", "+FLAGS", "(\\Deleted)") in imap.stores
@@ -713,17 +856,23 @@ def test_delete_message_uses_per_account_trash_folder_override(monkeypatch):
     acct = {**ACCT, "trash_folder": "Papierkorb"}
     monkeypatch.setattr(email_mcp, "_get_account", lambda aid: acct)
     # list_resp lacks any \Trash flag, so the account config must win.
-    imap = _FakeIMAP(list_resp=[
-        b'(\\HasNoChildren) "/" "INBOX"',
-        b'(\\HasNoChildren \\Sent) "/" "Sent"',
-    ])
+    imap = _FakeIMAP(
+        list_resp=[
+            b'(\\HasNoChildren) "/" "INBOX"',
+            b'(\\HasNoChildren \\Sent) "/" "Sent"',
+        ]
+    )
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+            )
         )
-    ))
+    )
 
     assert imap.copied == [("42", "Papierkorb")]
     assert "Papierkorb" in result
@@ -736,11 +885,15 @@ def test_delete_message_falls_back_to_hardcoded_trash_when_no_special_use_or_con
     imap = _FakeIMAP(list_resp=[b'(\\HasNoChildren) "/" "INBOX"'])
     _install_imap(monkeypatch, imap)
 
-    run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
+    run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+            )
         )
-    ))
+    )
 
     assert imap.copied == [("42", "Trash")]
 
@@ -752,17 +905,22 @@ def test_delete_message_explicit_trash_folder_param_wins_over_special_use(
     imap = _FakeIMAP()  # advertises \Trash on "Trash"
     _install_imap(monkeypatch, imap)
 
-    run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
-            trash_folder="Junk",
+    run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+                trash_folder="Junk",
+            )
         )
-    ))
+    )
 
     assert imap.copied == [("42", "Junk")]
 
 
 # ----------------------------- Group B: permanent path -----------------------
+
 
 def test_delete_message_permanent_skips_copy_and_uses_uid_expunge(
     stub_account, monkeypatch
@@ -771,11 +929,16 @@ def test_delete_message_permanent_skips_copy_and_uses_uid_expunge(
     imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX", permanent=True,
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+                permanent=True,
+            )
         )
-    ))
+    )
 
     assert imap.copied == []
     assert ("42", "+FLAGS", "(\\Deleted)") in imap.stores
@@ -793,11 +956,16 @@ def test_delete_message_permanent_refuses_and_clears_deleted_without_uidplus(
     imap = _FakeIMAP(capabilities=("IMAP4REV1",))  # no UIDPLUS
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX", permanent=True,
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+                permanent=True,
+            )
         )
-    ))
+    )
 
     assert imap.uid_expunges == []
     assert imap.bare_expunged is False
@@ -810,9 +978,11 @@ def test_delete_message_permanent_refuses_and_clears_deleted_without_uidplus(
 
 # ----------------------------- Group C: error / validation -------------------
 
+
 def test_delete_message_uid_not_found_returns_error(stub_account, monkeypatch):
     """If the COPY-to-Trash fails with a non-TRYCREATE error, surface it
     and don't expunge."""
+
     class _CopyFailIMAP(_FakeIMAP):
         def uid(self, cmd, *args):
             if cmd == "COPY":
@@ -823,11 +993,15 @@ def test_delete_message_uid_not_found_returns_error(stub_account, monkeypatch):
     imap = _CopyFailIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+            )
         )
-    ))
+    )
 
     assert result.lower().startswith("error")
     assert "UID not found" in result or "uid not found" in result.lower()
@@ -836,13 +1010,17 @@ def test_delete_message_uid_not_found_returns_error(stub_account, monkeypatch):
 
 def test_delete_message_unknown_account_returns_error(monkeypatch):
     """Missing account_id surfaces a clean error, no IMAP contact."""
+
     def _missing(aid):
         raise ValueError(f"Account '{aid}' not found. Use email_list_accounts.")
+
     monkeypatch.setattr(email_mcp, "_get_account", _missing)
 
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(account_id="nope", uid="1", folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(account_id="nope", uid="1", folder="INBOX")
+        )
+    )
 
     assert result.lower().startswith("error")
     assert "not found" in result.lower()
@@ -863,6 +1041,7 @@ def test_delete_message_rejects_empty_uid(monkeypatch):
 
 def test_delete_message_auto_creates_trash_when_missing(stub_account, monkeypatch):
     """On TRYCREATE, the tool creates the trash folder and retries COPY."""
+
     class _TryCreateIMAP(_FakeIMAP):
         def __init__(self, **kw):
             super().__init__(**kw)
@@ -882,11 +1061,15 @@ def test_delete_message_auto_creates_trash_when_missing(stub_account, monkeypatc
     imap = _TryCreateIMAP()
     _install_imap(monkeypatch, imap)
 
-    run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
+    run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+            )
         )
-    ))
+    )
 
     assert "Trash" in imap.created
     assert imap.copied == [("42", "Trash")]
@@ -895,6 +1078,7 @@ def test_delete_message_auto_creates_trash_when_missing(stub_account, monkeypatc
 
 # ----------------------------- Group D: email_expunge ------------------------
 
+
 def test_expunge_with_uid_uses_uid_expunge_when_uidplus_supported(
     stub_account, monkeypatch
 ):
@@ -902,11 +1086,15 @@ def test_expunge_with_uid_uses_uid_expunge_when_uidplus_supported(
     imap = _FakeIMAP()  # UIDPLUS present
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_expunge(
-        email_mcp.ExpungeInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
+    result = run(
+        email_mcp.email_expunge(
+            email_mcp.ExpungeInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+            )
         )
-    ))
+    )
 
     assert imap.selected == ("INBOX", False)
     assert imap.uid_expunges == ["42"]
@@ -923,9 +1111,11 @@ def test_expunge_without_uid_refuses_unless_confirm_bare_expunge_true(
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_expunge(
-        email_mcp.ExpungeInput(account_id=ACCT_ID, folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_expunge(
+            email_mcp.ExpungeInput(account_id=ACCT_ID, folder="INBOX")
+        )
+    )
 
     assert result.lower().startswith("error")
     low = result.lower()
@@ -939,11 +1129,15 @@ def test_expunge_bare_with_confirm_flag_calls_expunge(stub_account, monkeypatch)
     imap = _FakeIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_expunge(
-        email_mcp.ExpungeInput(
-            account_id=ACCT_ID, folder="Trash", confirm_bare_expunge=True,
+    result = run(
+        email_mcp.email_expunge(
+            email_mcp.ExpungeInput(
+                account_id=ACCT_ID,
+                folder="Trash",
+                confirm_bare_expunge=True,
+            )
         )
-    ))
+    )
 
     assert imap.bare_expunged is True
     assert "Trash" in result
@@ -954,11 +1148,15 @@ def test_expunge_with_uid_refuses_when_no_uidplus(stub_account, monkeypatch):
     imap = _FakeIMAP(capabilities=("IMAP4REV1",))
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_expunge(
-        email_mcp.ExpungeInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
+    result = run(
+        email_mcp.email_expunge(
+            email_mcp.ExpungeInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+            )
         )
-    ))
+    )
 
     assert "UIDPLUS" in result
     assert "refusing" in result.lower()
@@ -968,6 +1166,7 @@ def test_expunge_with_uid_refuses_when_no_uidplus(stub_account, monkeypatch):
 
 def test_expunge_non_ok_response_returns_error(stub_account, monkeypatch):
     """Server returns NO on UID EXPUNGE → tool surfaces the error string."""
+
     class _PermDeniedIMAP(_FakeIMAP):
         def uid(self, cmd, *args):
             if cmd == "EXPUNGE":
@@ -977,11 +1176,15 @@ def test_expunge_non_ok_response_returns_error(stub_account, monkeypatch):
     imap = _PermDeniedIMAP()
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_expunge(
-        email_mcp.ExpungeInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX",
+    result = run(
+        email_mcp.email_expunge(
+            email_mcp.ExpungeInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+            )
         )
-    ))
+    )
 
     assert result.lower().startswith("error")
     assert imap.logged_out is True
@@ -989,20 +1192,23 @@ def test_expunge_non_ok_response_returns_error(stub_account, monkeypatch):
 
 # ----------------------------- Group E: _resolve_trash_folder helper --------
 
+
 def test_resolve_trash_param_override_wins():
     """``override`` argument trumps every other source."""
     conn = _FakeIMAP()  # advertises \Trash on "Trash"
-    assert email_mcp._resolve_trash_folder(
-        conn, {"trash_folder": "X"}, override="Y"
-    ) == "Y"
+    assert (
+        email_mcp._resolve_trash_folder(conn, {"trash_folder": "X"}, override="Y")
+        == "Y"
+    )
 
 
 def test_resolve_trash_account_config_beats_special_use():
     """Per-account config beats SPECIAL-USE detection."""
     conn = _FakeIMAP()  # advertises \Trash on "Trash"
-    assert email_mcp._resolve_trash_folder(
-        conn, {"trash_folder": "Papierkorb"}
-    ) == "Papierkorb"
+    assert (
+        email_mcp._resolve_trash_folder(conn, {"trash_folder": "Papierkorb"})
+        == "Papierkorb"
+    )
 
 
 def test_resolve_trash_account_config_null_falls_through():
@@ -1039,15 +1245,19 @@ def test_resolve_trash_hardcoded_fallback_when_nothing_found():
 
 def _raising_imap(monkeypatch, exc):
     """Override _imap_connect to raise ``exc`` on the next call."""
+
     def boom(acct):
         raise exc
+
     monkeypatch.setattr(email_mcp, "_imap_connect", boom)
 
 
 def _make_logout_raiser(fake, exc):
     """Replace ``fake.logout`` with one that raises ``exc``."""
+
     def _raise():
         raise exc
+
     fake.logout = _raise
 
 
@@ -1056,70 +1266,91 @@ def _make_logout_raiser(fake, exc):
 
 def test_create_folder_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom create"))
-    result = run(email_mcp.email_create_folder(
-        email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="X")
-    ))
+    result = run(
+        email_mcp.email_create_folder(
+            email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="X")
+        )
+    )
     assert result.startswith("Error:")
     assert "boom create" in result
 
 
 def test_delete_folder_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom delete"))
-    result = run(email_mcp.email_delete_folder(
-        email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="X")
-    ))
+    result = run(
+        email_mcp.email_delete_folder(
+            email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="X")
+        )
+    )
     assert result.startswith("Error:")
     assert "boom delete" in result
 
 
 def test_move_message_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom move"))
-    result = run(email_mcp.email_move_message(
-        email_mcp.MoveEmailInput(
-            account_id=ACCT_ID, uid="1",
-            source_folder="INBOX", dest_folder="Archive",
+    result = run(
+        email_mcp.email_move_message(
+            email_mcp.MoveEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                source_folder="INBOX",
+                dest_folder="Archive",
+            )
         )
-    ))
+    )
     assert result.startswith("Error")
     assert "boom move" in result
 
 
-def test_delete_message_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+def test_delete_message_outer_except_when_imap_connect_raises(
+    stub_account, monkeypatch
+):
     _raising_imap(monkeypatch, RuntimeError("boom delete msg"))
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(account_id=ACCT_ID, uid="1")
-    ))
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(account_id=ACCT_ID, uid="1")
+        )
+    )
     assert result.startswith("Error")
     assert "boom delete msg" in result
 
 
 def test_expunge_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom expunge"))
-    result = run(email_mcp.email_expunge(
-        email_mcp.ExpungeInput(account_id=ACCT_ID, uid="1")
-    ))
+    result = run(
+        email_mcp.email_expunge(email_mcp.ExpungeInput(account_id=ACCT_ID, uid="1"))
+    )
     assert result.startswith("Error")
     assert "boom expunge" in result
 
 
 def test_reply_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom reply"))
-    result = run(email_mcp.email_reply(
-        email_mcp.ReplyEmailInput(
-            account_id=ACCT_ID, uid="1", body="ack", reply_all=False,
+    result = run(
+        email_mcp.email_reply(
+            email_mcp.ReplyEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                body="ack",
+                reply_all=False,
+            )
         )
-    ))
+    )
     assert result.startswith("Error")
     assert "boom reply" in result
 
 
 def test_forward_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom forward"))
-    result = run(email_mcp.email_forward(
-        email_mcp.ForwardEmailInput(
-            account_id=ACCT_ID, uid="1", to="team@example.com",
+    result = run(
+        email_mcp.email_forward(
+            email_mcp.ForwardEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                to="team@example.com",
+            )
         )
-    ))
+    )
     assert result.startswith("Error")
     assert "boom forward" in result
 
@@ -1131,9 +1362,11 @@ def test_create_folder_swallows_logout_exception(stub_account, monkeypatch):
     imap = _FakeIMAP()
     _make_logout_raiser(imap, OSError("logout fail"))
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_create_folder(
-        email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="Archive")
-    ))
+    result = run(
+        email_mcp.email_create_folder(
+            email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="Archive")
+        )
+    )
     # The happy-path "created" response is still returned — the swallow
     # caught the logout error.
     assert "created" in result.lower()
@@ -1148,12 +1381,15 @@ def test_create_folder_returns_error_on_non_ok_status(stub_account, monkeypatch)
 
     def _bad_create(folder):
         return ("NO", [b"server busy"])
+
     imap.create = _bad_create
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_create_folder(
-        email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="X")
-    ))
+    result = run(
+        email_mcp.email_create_folder(
+            email_mcp.CreateFolderInput(account_id=ACCT_ID, folder="X")
+        )
+    )
     assert "Error creating folder" in result
     assert "server busy" in result
 
@@ -1163,12 +1399,15 @@ def test_delete_folder_returns_error_on_non_ok_status(stub_account, monkeypatch)
 
     def _bad_delete(folder):
         return ("NO", [b"server busy"])
+
     imap.delete = _bad_delete
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_delete_folder(
-        email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="X")
-    ))
+    result = run(
+        email_mcp.email_delete_folder(
+            email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="X")
+        )
+    )
     assert "Error deleting folder" in result
     assert "server busy" in result
 
@@ -1181,30 +1420,42 @@ def test_move_message_returns_error_when_copy_fails(stub_account, monkeypatch):
         if cmd == "COPY":
             return ("NO", [b"quota exceeded"])
         return orig_uid(cmd, *args)
+
     imap.uid = _bad_uid
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_move_message(
-        email_mcp.MoveEmailInput(
-            account_id=ACCT_ID, uid="1",
-            source_folder="INBOX", dest_folder="Archive",
+    result = run(
+        email_mcp.email_move_message(
+            email_mcp.MoveEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                source_folder="INBOX",
+                dest_folder="Archive",
+            )
         )
-    ))
+    )
     assert "Error copying message" in result
     assert "quota exceeded" in result
     # No EXPUNGE issued after the COPY failure.
     assert imap.uid_expunges == []
 
 
-def test_delete_message_move_to_trash_refuses_without_uidplus(stub_account, monkeypatch):
+def test_delete_message_move_to_trash_refuses_without_uidplus(
+    stub_account, monkeypatch
+):
     imap = _FakeIMAP(capabilities=("IMAP4REV1",))  # no UIDPLUS
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX", permanent=False,
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+                permanent=False,
+            )
         )
-    ))
+    )
     # The move-to-trash arm refuses without UIDPLUS, BEFORE resolving trash
     # or issuing COPY. Lines 2118-2123 in servers/email_mcp.py.
     assert "refusing to issue an untargeted EXPUNGE" in result
@@ -1219,11 +1470,16 @@ def test_reply_returns_error_when_original_fetch_fails(stub_account, monkeypatch
     imap = _FakeIMAP(fetch_bodies={})
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_reply(
-        email_mcp.ReplyEmailInput(
-            account_id=ACCT_ID, uid="999", body="ack", reply_all=False,
+    result = run(
+        email_mcp.email_reply(
+            email_mcp.ReplyEmailInput(
+                account_id=ACCT_ID,
+                uid="999",
+                body="ack",
+                reply_all=False,
+            )
         )
-    ))
+    )
     assert "Error: Could not fetch message UID 999" in result
 
 
@@ -1231,11 +1487,15 @@ def test_forward_returns_error_when_original_fetch_fails(stub_account, monkeypat
     imap = _FakeIMAP(fetch_bodies={})
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_forward(
-        email_mcp.ForwardEmailInput(
-            account_id=ACCT_ID, uid="999", to="team@example.com",
+    result = run(
+        email_mcp.email_forward(
+            email_mcp.ForwardEmailInput(
+                account_id=ACCT_ID,
+                uid="999",
+                to="team@example.com",
+            )
         )
-    ))
+    )
     assert "Error: Could not fetch message UID 999" in result
 
 
@@ -1251,6 +1511,7 @@ def test_forward_returns_error_when_original_fetch_fails(stub_account, monkeypat
 
 def test_resolve_trash_swallows_list_exception():
     """``conn.list()`` raises → except clause swallows; fallback to ``"Trash"``."""
+
     class _RaisingIMAP:
         def list(self, *args, **kwargs):
             raise RuntimeError("LIST kaput")
@@ -1262,15 +1523,19 @@ def test_resolve_trash_swallows_list_exception():
 def test_resolve_trash_special_use_from_tuple_list_item():
     """LIST entry returned as imaplib literal-form tuple is scanned for the
     ``\\Trash`` flag too. Pins the `elif isinstance(item, tuple)` branch."""
+
     class _TupleListIMAP:
         capabilities = ("IMAP4REV1",)
 
         def list(self, *args, **kwargs):
             # Literal-form tuple: (header_bytes_with_flags, mailbox_name_bytes)
-            return ("OK", [
-                (b'(\\HasNoChildren \\Trash) "/" {7}', b"Deleted"),
-                b'(\\HasNoChildren) "/" "INBOX"',
-            ])
+            return (
+                "OK",
+                [
+                    (b'(\\HasNoChildren \\Trash) "/" {7}', b"Deleted"),
+                    b'(\\HasNoChildren) "/" "INBOX"',
+                ],
+            )
 
     result = email_mcp._resolve_trash_folder(_TupleListIMAP(), {})
     assert result == "Deleted"
@@ -1279,13 +1544,17 @@ def test_resolve_trash_special_use_from_tuple_list_item():
 def test_resolve_trash_skips_unknown_list_item_types():
     """LIST entry that's neither bytes nor a tuple-with-bytes[0] → `continue`.
     Pins line 508 (the `else: continue` arm in the loop)."""
+
     class _WeirdListIMAP:
         def list(self, *args, **kwargs):
-            return ("OK", [
-                12345,  # not bytes, not a tuple of bytes
-                (None, b"unused"),  # tuple but item[0] isn't bytes
-                b'(\\HasNoChildren \\Trash) "/" "RealTrash"',
-            ])
+            return (
+                "OK",
+                [
+                    12345,  # not bytes, not a tuple of bytes
+                    (None, b"unused"),  # tuple but item[0] isn't bytes
+                    b'(\\HasNoChildren \\Trash) "/" "RealTrash"',
+                ],
+            )
 
     assert email_mcp._resolve_trash_folder(_WeirdListIMAP(), {}) == "RealTrash"
 
@@ -1293,16 +1562,22 @@ def test_resolve_trash_skips_unknown_list_item_types():
 def test_send_message_tool_outer_except_when_get_account_raises(monkeypatch):
     """``email_send_message`` outer-except: ``_get_account`` raises →
     "Error sending email: …" returned. Pins lines 1861-1862."""
+
     def _boom(aid):
         raise RuntimeError("acct boom")
 
     monkeypatch.setattr(email_mcp, "_get_account", _boom)
 
-    result = run(email_mcp.email_send_message(
-        email_mcp.SendEmailInput(
-            account_id=ACCT_ID, to="x@example.com", subject="s", body="b",
+    result = run(
+        email_mcp.email_send_message(
+            email_mcp.SendEmailInput(
+                account_id=ACCT_ID,
+                to="x@example.com",
+                subject="s",
+                body="b",
+            )
         )
-    ))
+    )
     assert result.startswith("Error sending email")
     assert "acct boom" in result
 
@@ -1311,6 +1586,7 @@ def test_add_account_input_rejects_unknown_security_value():
     """``imap_security="weird"`` must be rejected by the field validator.
     Pins line 744-745 — the `raise ValueError(...)` arm."""
     import pydantic
+
     with pytest.raises(pydantic.ValidationError, match="Must be 'ssl'"):
         email_mcp.AddAccountInput(**_input_kwargs(id="bad", imap_security="weird"))
 
@@ -1332,12 +1608,16 @@ def test_send_message_tool_happy_path_returns_confirmation(stub_account, monkeyp
     monkeypatch.setattr(email_mcp, "_smtp_connect", lambda acct: smtp)
     monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: _FakeIMAP())
 
-    result = run(email_mcp.email_send_message(
-        email_mcp.SendEmailInput(
-            account_id=ACCT_ID, to="alice@example.com",
-            subject="hello", body="body text",
+    result = run(
+        email_mcp.email_send_message(
+            email_mcp.SendEmailInput(
+                account_id=ACCT_ID,
+                to="alice@example.com",
+                subject="hello",
+                body="body text",
+            )
         )
-    ))
+    )
     assert "Email sent from me@example.com to alice@example.com" in result
     assert '"hello"' in result
     assert len(smtp.sendmail_calls) == 1
@@ -1360,9 +1640,11 @@ class _LogoutRaisingIMAP(_FakeIMAP):
 def test_delete_folder_swallows_logout_exception(stub_account, monkeypatch):
     imap = _LogoutRaisingIMAP()
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_delete_folder(
-        email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="OldStuff")
-    ))
+    result = run(
+        email_mcp.email_delete_folder(
+            email_mcp.DeleteFolderInput(account_id=ACCT_ID, folder="OldStuff")
+        )
+    )
     assert "deleted from" in result
 
 
@@ -1375,11 +1657,14 @@ def test_search_messages_swallows_logout_exception(stub_account, monkeypatch):
         if cmd == "SEARCH":
             return ("OK", [b"1"])
         return orig_uid(cmd, *args)
+
     imap.uid = _uid
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_search_messages(
-        email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
-    ))
+    result = run(
+        email_mcp.email_search_messages(
+            email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
+        )
+    )
     # Happy result, even though logout raised.
     assert "# Search Results" in result
 
@@ -1387,34 +1672,47 @@ def test_search_messages_swallows_logout_exception(stub_account, monkeypatch):
 def test_move_message_swallows_logout_exception(stub_account, monkeypatch):
     imap = _LogoutRaisingIMAP()
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_move_message(
-        email_mcp.MoveEmailInput(
-            account_id=ACCT_ID, uid="1",
-            source_folder="INBOX", dest_folder="Archive",
+    result = run(
+        email_mcp.email_move_message(
+            email_mcp.MoveEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                source_folder="INBOX",
+                dest_folder="Archive",
+            )
         )
-    ))
+    )
     assert "moved" in result.lower()
 
 
 def test_delete_message_swallows_logout_exception(stub_account, monkeypatch):
     imap = _LogoutRaisingIMAP()
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="1", folder="INBOX", permanent=True,
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                folder="INBOX",
+                permanent=True,
+            )
         )
-    ))
+    )
     assert "permanently deleted" in result
 
 
 def test_expunge_swallows_logout_exception(stub_account, monkeypatch):
     imap = _LogoutRaisingIMAP()
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_expunge(
-        email_mcp.ExpungeInput(
-            account_id=ACCT_ID, folder="INBOX", uid="1",
+    result = run(
+        email_mcp.email_expunge(
+            email_mcp.ExpungeInput(
+                account_id=ACCT_ID,
+                folder="INBOX",
+                uid="1",
+            )
         )
-    ))
+    )
     assert "Expunged UID 1" in result
 
 
@@ -1425,11 +1723,15 @@ def test_reply_swallows_logout_exception(stub_account, monkeypatch, fake_smtp):
         fetch_bodies={"1": _msg_bytes(frm="alice@example.com", subject="hi")},
     )
     _install_imap(monkeypatch, raising)
-    result = run(email_mcp.email_reply(
-        email_mcp.ReplyEmailInput(
-            account_id=ACCT_ID, uid="1", body="thanks",
+    result = run(
+        email_mcp.email_reply(
+            email_mcp.ReplyEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                body="thanks",
+            )
         )
-    ))
+    )
     assert "Reply sent to" in result
 
 
@@ -1438,11 +1740,15 @@ def test_forward_swallows_logout_exception(stub_account, monkeypatch, fake_smtp)
         fetch_bodies={"1": _msg_bytes(subject="please forward")},
     )
     _install_imap(monkeypatch, raising)
-    result = run(email_mcp.email_forward(
-        email_mcp.ForwardEmailInput(
-            account_id=ACCT_ID, uid="1", to="team@example.com",
+    result = run(
+        email_mcp.email_forward(
+            email_mcp.ForwardEmailInput(
+                account_id=ACCT_ID,
+                uid="1",
+                to="team@example.com",
+            )
         )
-    ))
+    )
     assert "Forwarded to team@example.com" in result
 
 
@@ -1468,7 +1774,8 @@ class _NoSentIMAP(_FakeIMAP):
 
 
 def test_send_message_sent_folder_loop_exhausts_without_append(
-    stub_account, monkeypatch,
+    stub_account,
+    monkeypatch,
 ):
     """All four ``Sent`` candidates return NO from ``select()`` → the for-
     loop exhausts without triggering ``append``. SMTP still succeeded, so
@@ -1479,12 +1786,16 @@ def test_send_message_sent_folder_loop_exhausts_without_append(
     imap = _NoSentIMAP()
     monkeypatch.setattr(email_mcp, "_imap_connect", lambda acct: imap)
 
-    result = run(email_mcp.email_send_message(
-        email_mcp.SendEmailInput(
-            account_id=ACCT_ID, to="alice@example.com",
-            subject="loop-exhaust", body="body",
+    result = run(
+        email_mcp.email_send_message(
+            email_mcp.SendEmailInput(
+                account_id=ACCT_ID,
+                to="alice@example.com",
+                subject="loop-exhaust",
+                body="body",
+            )
         )
-    ))
+    )
     assert "Email sent" in result
     assert len(smtp.sendmail_calls) == 1
     # No append happened — every candidate select returned NO.
@@ -1513,12 +1824,16 @@ def test_move_uses_uid_expunge_with_str_capabilities(stub_account, monkeypatch):
     imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))  # str, not bytes
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_move_message(
-        email_mcp.MoveEmailInput(
-            account_id=ACCT_ID, uid="42",
-            source_folder="INBOX", dest_folder="Archive",
+    result = run(
+        email_mcp.email_move_message(
+            email_mcp.MoveEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                source_folder="INBOX",
+                dest_folder="Archive",
+            )
         )
-    ))
+    )
 
     assert imap.uid_expunges == ["42"]
     assert "moved" in result.lower()
@@ -1534,11 +1849,16 @@ def test_delete_message_permanent_with_str_capabilities(stub_account, monkeypatc
     imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))  # str, not bytes
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_delete_message(
-        email_mcp.DeleteEmailInput(
-            account_id=ACCT_ID, uid="42", folder="INBOX", permanent=True,
+    result = run(
+        email_mcp.email_delete_message(
+            email_mcp.DeleteEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+                folder="INBOX",
+                permanent=True,
+            )
         )
-    ))
+    )
 
     assert imap.uid_expunges == ["42"]
     assert imap.copied == []
@@ -1556,9 +1876,11 @@ def test_expunge_with_uid_uses_str_capabilities(stub_account, monkeypatch):
     imap = _FakeIMAP(capabilities=("IMAP4REV1", "UIDPLUS"))  # str, not bytes
     _install_imap(monkeypatch, imap)
 
-    result = run(email_mcp.email_expunge(
-        email_mcp.ExpungeInput(account_id=ACCT_ID, uid="42", folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_expunge(
+            email_mcp.ExpungeInput(account_id=ACCT_ID, uid="42", folder="INBOX")
+        )
+    )
 
     assert imap.uid_expunges == ["42"]
     assert "42" in result and "INBOX" in result
@@ -1566,7 +1888,9 @@ def test_expunge_with_uid_uses_str_capabilities(stub_account, monkeypatch):
 
 
 def test_reply_to_message_without_message_id_skips_references_update(
-    stub_account, monkeypatch, fake_smtp,
+    stub_account,
+    monkeypatch,
+    fake_smtp,
 ):
     """Original message has no Message-ID header → ``if message_id:`` is
     False; the references header stays untouched. The reply still goes out.
@@ -1583,9 +1907,15 @@ def test_reply_to_message_without_message_id_skips_references_update(
 
     imap = _FakeIMAP(fetch_bodies={"7": msg.as_bytes()})
     _install_imap(monkeypatch, imap)
-    result = run(email_mcp.email_reply(email_mcp.ReplyEmailInput(
-        account_id=ACCT_ID, uid="7", body="thanks",
-    )))
+    result = run(
+        email_mcp.email_reply(
+            email_mcp.ReplyEmailInput(
+                account_id=ACCT_ID,
+                uid="7",
+                body="thanks",
+            )
+        )
+    )
     assert "Reply sent" in result
     assert len(fake_smtp.sendmail_calls) == 1
     sent_wire = fake_smtp.sendmail_calls[0][2]

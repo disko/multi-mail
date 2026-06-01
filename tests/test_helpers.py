@@ -3,6 +3,7 @@ header decoding, MIME body extraction, message summary, autoconfig
 socket-type mapping, and the email-domain splitter.
 
 These are all unit-testable without touching the network."""
+
 from __future__ import annotations
 
 import email
@@ -29,6 +30,7 @@ _map_socket_type = email_mcp._map_socket_type
 # ---------------------------------------------------------------------------
 # _decode_header — RFC 2047
 # ---------------------------------------------------------------------------
+
 
 def test_decode_header_plain_ascii():
     assert _decode_header("Hello") == "Hello"
@@ -68,6 +70,7 @@ def test_decode_header_unknown_charset_falls_back_to_utf8():
 # _get_body — plain/HTML extraction from MIME
 # ---------------------------------------------------------------------------
 
+
 def _multipart(parts):
     msg = email.mime.multipart.MIMEMultipart("alternative")
     for p in parts:
@@ -81,17 +84,21 @@ def test_get_body_plain_text_singlepart():
 
 
 def test_get_body_prefers_plain_over_html():
-    msg = _multipart([
-        email.mime.text.MIMEText("<b>html version</b>", "html", "utf-8"),
-        email.mime.text.MIMEText("plain version", "plain", "utf-8"),
-    ])
+    msg = _multipart(
+        [
+            email.mime.text.MIMEText("<b>html version</b>", "html", "utf-8"),
+            email.mime.text.MIMEText("plain version", "plain", "utf-8"),
+        ]
+    )
     assert _get_body(msg) == "plain version"
 
 
 def test_get_body_falls_back_to_html_when_no_plain():
-    msg = _multipart([
-        email.mime.text.MIMEText("<b>only html</b>", "html", "utf-8"),
-    ])
+    msg = _multipart(
+        [
+            email.mime.text.MIMEText("<b>only html</b>", "html", "utf-8"),
+        ]
+    )
     assert _get_body(msg) == "<b>only html</b>"
 
 
@@ -109,6 +116,7 @@ def test_get_body_empty_when_no_text_part():
 # ---------------------------------------------------------------------------
 # _summarise_msg
 # ---------------------------------------------------------------------------
+
 
 def test_summarise_msg_extracts_standard_headers():
     msg = email.mime.text.MIMEText("body", "plain", "utf-8")
@@ -141,6 +149,7 @@ def test_summarise_msg_missing_headers_blank():
 # ---------------------------------------------------------------------------
 # _domain_from_email + _map_socket_type
 # ---------------------------------------------------------------------------
+
 
 def test_domain_from_email_simple():
     assert _domain_from_email("alice@example.com") == "example.com"
@@ -235,7 +244,7 @@ def test_parse_imap_list_line_unterminated_delimiter_returns_none():
 
 def test_parse_imap_list_line_atom_delimiter_no_name_returns_none():
     """Atom-form delimiter (NIL) with no following mailbox token → None."""
-    assert _parse_imap_list_line(b'(\\HasNoChildren) NIL') is None
+    assert _parse_imap_list_line(b"(\\HasNoChildren) NIL") is None
 
 
 def test_parse_imap_list_line_unterminated_quoted_name_returns_none():
@@ -260,7 +269,7 @@ def test_parse_imap_list_line_atom_form_returns_last_token():
 
 def test_parse_imap_list_line_atom_form_nil_delimiter_returns_name():
     """Atom NIL delimiter + atom mailbox name → name extracted (no delimiter)."""
-    assert _parse_imap_list_line(b'(\\HasNoChildren) NIL INBOX') == "INBOX"
+    assert _parse_imap_list_line(b"(\\HasNoChildren) NIL INBOX") == "INBOX"
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +331,7 @@ def test_parse_imap_list_line_no_leading_paren_uses_atom_delim_path():
     the first token is taken as the delimiter atom. Pins partial 428->443."""
     # No flag group; the first token IS the delimiter atom (NIL).
     # Then the rest is the mailbox name.
-    assert _parse_imap_list_line(b'NIL Inbox') == "Inbox"
+    assert _parse_imap_list_line(b"NIL Inbox") == "Inbox"
 
 
 def test_parse_imap_list_line_nested_parens_in_flag_group():
@@ -340,9 +349,11 @@ def test_resolve_trash_folder_list_status_not_ok_falls_through():
     """``conn.list()`` returns ("NO", []) → the `if status == "OK"` arm is
     skipped; function falls through to the hardcoded "Trash" default.
     Pins 501->516."""
+
     class _NOIMAP:
         def list(self):
             return ("NO", [])
+
     assert email_mcp._resolve_trash_folder(_NOIMAP(), {"id": "x"}) == "Trash"
 
 
@@ -351,8 +362,10 @@ def test_resolve_trash_folder_trash_flag_with_unparseable_name_skips():
     ``_parse_imap_list_line`` returns None for the line → continue. With no
     other Trash candidate found, fall back to the hardcoded default.
     Pins partial 511->502."""
+
     class _BadIMAP:
         def list(self):
             # Unterminated quoted name → parser returns None at line 462.
             return ("OK", [b'(\\HasNoChildren \\Trash) "/" "unterminated'])
+
     assert email_mcp._resolve_trash_folder(_BadIMAP(), {"id": "x"}) == "Trash"

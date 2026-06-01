@@ -10,6 +10,7 @@ stdlib-shaped construction classes (``imaplib.IMAP4_SSL`` /
 ``caldav.DAVClient``) with constructor-capture fakes — mirroring the
 ``_FakeMS`` pattern in ``test_sieve_diagnostics.py``.
 """
+
 from __future__ import annotations
 
 import importlib.util

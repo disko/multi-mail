@@ -7,6 +7,7 @@ The DAV helpers ``_carddav_propfind``, ``_carddav_list_vcards``, and the
 exercise the tool-level orchestration (sorting, limiting, filtering, output
 shape, status-code handling) without touching the network.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,6 +39,7 @@ ACCT = {
 
 # --- vCard fixtures --------------------------------------------------------
 
+
 def _vcard(uid, fn, email_=None, tel=None):
     parts = ["BEGIN:VCARD", "VERSION:3.0", f"UID:{uid}", f"FN:{fn}"]
     parts.append(f"N:{fn.split()[-1] if ' ' in fn else fn};{fn.split()[0]};;;")
@@ -50,6 +52,7 @@ def _vcard(uid, fn, email_=None, tel=None):
 
 
 # --- Fixtures --------------------------------------------------------------
+
 
 @pytest.fixture
 def stub_account(monkeypatch):
@@ -73,8 +76,10 @@ def stub_books(monkeypatch):
 
 def _install_vcards(monkeypatch, vcards):
     """Make _carddav_list_vcards return the given list of (href, data) tuples."""
+
     async def fake_list(acct, book_href):
         return vcards
+
     monkeypatch.setattr(email_mcp, "_carddav_list_vcards", fake_list)
 
 
@@ -86,10 +91,13 @@ def run(coro):
 # card_list_addressbooks
 # ---------------------------------------------------------------------------
 
+
 def test_list_addressbooks_renders_markdown(stub_account, stub_books):
-    result = run(email_mcp.card_list_addressbooks(
-        email_mcp.CardListAddressBooksInput(account_id=ACCT_ID)
-    ))
+    result = run(
+        email_mcp.card_list_addressbooks(
+            email_mcp.CardListAddressBooksInput(account_id=ACCT_ID)
+        )
+    )
     assert "# Address Books" in result
     assert "- **Personal**" in result
     assert "- **Work**" in result
@@ -98,10 +106,13 @@ def test_list_addressbooks_renders_markdown(stub_account, stub_books):
 def test_list_addressbooks_empty_returns_friendly_message(stub_account, monkeypatch):
     async def empty(acct):
         return []
+
     monkeypatch.setattr(email_mcp, "_carddav_propfind", empty)
-    result = run(email_mcp.card_list_addressbooks(
-        email_mcp.CardListAddressBooksInput(account_id=ACCT_ID)
-    ))
+    result = run(
+        email_mcp.card_list_addressbooks(
+            email_mcp.CardListAddressBooksInput(account_id=ACCT_ID)
+        )
+    )
     assert "No address books found" in result
 
 
@@ -109,15 +120,23 @@ def test_list_addressbooks_empty_returns_friendly_message(stub_account, monkeypa
 # card_list_contacts
 # ---------------------------------------------------------------------------
 
-def test_list_contacts_sorted_alphabetically_by_fn(stub_account, stub_books, monkeypatch):
-    _install_vcards(monkeypatch, [
-        ("/c1.vcf", _vcard("c1", "Charlie Brown", "charlie@example.com")),
-        ("/c2.vcf", _vcard("c2", "alice example", "alice@example.com")),
-        ("/c3.vcf", _vcard("c3", "Bob Sample", "bob@example.com")),
-    ])
-    result = run(email_mcp.card_list_contacts(
-        email_mcp.CardListContactsInput(account_id=ACCT_ID)
-    ))
+
+def test_list_contacts_sorted_alphabetically_by_fn(
+    stub_account, stub_books, monkeypatch
+):
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/c1.vcf", _vcard("c1", "Charlie Brown", "charlie@example.com")),
+            ("/c2.vcf", _vcard("c2", "alice example", "alice@example.com")),
+            ("/c3.vcf", _vcard("c3", "Bob Sample", "bob@example.com")),
+        ],
+    )
+    result = run(
+        email_mcp.card_list_contacts(
+            email_mcp.CardListContactsInput(account_id=ACCT_ID)
+        )
+    )
     # Sorting is case-insensitive on fn
     alice_idx = result.index("alice example")
     bob_idx = result.index("Bob Sample")
@@ -125,20 +144,29 @@ def test_list_contacts_sorted_alphabetically_by_fn(stub_account, stub_books, mon
     assert alice_idx < bob_idx < charlie_idx
 
 
-def test_list_contacts_limits_results_and_shows_total(stub_account, stub_books, monkeypatch):
-    vcards = [(f"/c{i}.vcf", _vcard(f"u{i}", f"User {i:02d}", f"u{i}@example.com")) for i in range(10)]
+def test_list_contacts_limits_results_and_shows_total(
+    stub_account, stub_books, monkeypatch
+):
+    vcards = [
+        (f"/c{i}.vcf", _vcard(f"u{i}", f"User {i:02d}", f"u{i}@example.com"))
+        for i in range(10)
+    ]
     _install_vcards(monkeypatch, vcards)
-    result = run(email_mcp.card_list_contacts(
-        email_mcp.CardListContactsInput(account_id=ACCT_ID, limit=3)
-    ))
+    result = run(
+        email_mcp.card_list_contacts(
+            email_mcp.CardListContactsInput(account_id=ACCT_ID, limit=3)
+        )
+    )
     assert "(3 of 10)" in result
 
 
 def test_list_contacts_empty_book_message(stub_account, stub_books, monkeypatch):
     _install_vcards(monkeypatch, [])
-    result = run(email_mcp.card_list_contacts(
-        email_mcp.CardListContactsInput(account_id=ACCT_ID)
-    ))
+    result = run(
+        email_mcp.card_list_contacts(
+            email_mcp.CardListContactsInput(account_id=ACCT_ID)
+        )
+    )
     assert "No contacts found" in result
 
 
@@ -146,36 +174,56 @@ def test_list_contacts_empty_book_message(stub_account, stub_books, monkeypatch)
 # card_search_contacts
 # ---------------------------------------------------------------------------
 
+
 def test_search_filters_case_insensitively(stub_account, stub_books, monkeypatch):
-    _install_vcards(monkeypatch, [
-        ("/a.vcf", _vcard("a", "Alice Example", "alice@example.com")),
-        ("/b.vcf", _vcard("b", "Bob Sample", "bob@elsewhere.com")),
-        ("/c.vcf", _vcard("c", "Carol", "carol@example.com")),
-    ])
-    result = run(email_mcp.card_search_contacts(
-        email_mcp.CardSearchContactsInput(account_id=ACCT_ID, query="EXAMPLE.COM"),
-    ))
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/a.vcf", _vcard("a", "Alice Example", "alice@example.com")),
+            ("/b.vcf", _vcard("b", "Bob Sample", "bob@elsewhere.com")),
+            ("/c.vcf", _vcard("c", "Carol", "carol@example.com")),
+        ],
+    )
+    result = run(
+        email_mcp.card_search_contacts(
+            email_mcp.CardSearchContactsInput(account_id=ACCT_ID, query="EXAMPLE.COM"),
+        )
+    )
     assert "Alice Example" in result
     assert "Carol" in result
     assert "Bob Sample" not in result
 
 
 def test_search_no_matches_friendly_message(stub_account, stub_books, monkeypatch):
-    _install_vcards(monkeypatch, [
-        ("/a.vcf", _vcard("a", "Alice", "alice@example.com")),
-    ])
-    result = run(email_mcp.card_search_contacts(
-        email_mcp.CardSearchContactsInput(account_id=ACCT_ID, query="nothing-matches"),
-    ))
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/a.vcf", _vcard("a", "Alice", "alice@example.com")),
+        ],
+    )
+    result = run(
+        email_mcp.card_search_contacts(
+            email_mcp.CardSearchContactsInput(
+                account_id=ACCT_ID, query="nothing-matches"
+            ),
+        )
+    )
     assert "No contacts matching 'nothing-matches'" in result
 
 
 def test_search_respects_limit(stub_account, stub_books, monkeypatch):
-    vcards = [(f"/c{i}.vcf", _vcard(f"u{i}", "Common Name", f"u{i}@example.com")) for i in range(8)]
+    vcards = [
+        (f"/c{i}.vcf", _vcard(f"u{i}", "Common Name", f"u{i}@example.com"))
+        for i in range(8)
+    ]
     _install_vcards(monkeypatch, vcards)
-    result = run(email_mcp.card_search_contacts(
-        email_mcp.CardSearchContactsInput(account_id=ACCT_ID, query="Common", limit=3),
-    ))
+    result = run(
+        email_mcp.card_search_contacts(
+            email_mcp.CardSearchContactsInput(
+                account_id=ACCT_ID, query="Common", limit=3
+            ),
+        )
+    )
     assert "(3 matches)" in result
 
 
@@ -183,14 +231,23 @@ def test_search_respects_limit(stub_account, stub_books, monkeypatch):
 # card_get_contact
 # ---------------------------------------------------------------------------
 
+
 def test_get_contact_returns_full_record(stub_account, stub_books, monkeypatch):
-    _install_vcards(monkeypatch, [
-        ("/a.vcf", _vcard("contact-1", "Alice Example", "alice@example.com", "+15550001")),
-        ("/b.vcf", _vcard("contact-2", "Bob Sample", "bob@example.com")),
-    ])
-    result = run(email_mcp.card_get_contact(
-        email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="contact-1"),
-    ))
+    _install_vcards(
+        monkeypatch,
+        [
+            (
+                "/a.vcf",
+                _vcard("contact-1", "Alice Example", "alice@example.com", "+15550001"),
+            ),
+            ("/b.vcf", _vcard("contact-2", "Bob Sample", "bob@example.com")),
+        ],
+    )
+    result = run(
+        email_mcp.card_get_contact(
+            email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="contact-1"),
+        )
+    )
     assert "# Contact: Alice Example" in result
     assert "**UID**: contact-1" in result
     assert "**Email**: alice@example.com" in result
@@ -198,18 +255,24 @@ def test_get_contact_returns_full_record(stub_account, stub_books, monkeypatch):
 
 
 def test_get_contact_uid_not_found(stub_account, stub_books, monkeypatch):
-    _install_vcards(monkeypatch, [
-        ("/a.vcf", _vcard("contact-1", "Alice", "alice@example.com")),
-    ])
-    result = run(email_mcp.card_get_contact(
-        email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="missing"),
-    ))
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/a.vcf", _vcard("contact-1", "Alice", "alice@example.com")),
+        ],
+    )
+    result = run(
+        email_mcp.card_get_contact(
+            email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="missing"),
+        )
+    )
     assert "Contact with UID 'missing' not found" in result
 
 
 # ---------------------------------------------------------------------------
 # card_create_contact / update / delete — mock the HTTP layer
 # ---------------------------------------------------------------------------
+
 
 class _FakeResponse:
     def __init__(self, status_code=201, text=""):
@@ -223,6 +286,7 @@ class _FakeResponse:
 
 class _FakeAsyncClient:
     """Minimal stand-in for httpx.AsyncClient used by safe_async_client."""
+
     def __init__(self, response):
         self._response = response
         self.put_calls = []
@@ -263,10 +327,16 @@ def _install_client(monkeypatch, response):
 def test_create_contact_puts_to_pinned_url(stub_account, stub_books, monkeypatch):
     client = _install_client(monkeypatch, _FakeResponse(status_code=201))
 
-    result = run(email_mcp.card_create_contact(email_mcp.CardCreateContactInput(
-        account_id=ACCT_ID, fn="Alice Example", email="alice@example.com",
-        addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_create_contact(
+            email_mcp.CardCreateContactInput(
+                account_id=ACCT_ID,
+                fn="Alice Example",
+                email="alice@example.com",
+                addressbook_name="Personal",
+            )
+        )
+    )
 
     assert len(client.put_calls) == 1
     url = client.put_calls[0]["url"]
@@ -280,40 +350,70 @@ def test_create_contact_puts_to_pinned_url(stub_account, stub_books, monkeypatch
     assert "created" in result.lower()
 
 
-def test_create_contact_server_error_reports_status(stub_account, stub_books, monkeypatch):
+def test_create_contact_server_error_reports_status(
+    stub_account, stub_books, monkeypatch
+):
     _install_client(monkeypatch, _FakeResponse(status_code=507, text="quota"))
-    result = run(email_mcp.card_create_contact(email_mcp.CardCreateContactInput(
-        account_id=ACCT_ID, fn="Bob", email="bob@example.com",
-        addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_create_contact(
+            email_mcp.CardCreateContactInput(
+                account_id=ACCT_ID,
+                fn="Bob",
+                email="bob@example.com",
+                addressbook_name="Personal",
+            )
+        )
+    )
     assert "507" in result
 
 
-def test_delete_contact_walks_listing_then_deletes(stub_account, stub_books, monkeypatch):
-    _install_vcards(monkeypatch, [
-        ("/a.vcf", _vcard("alice-1", "Alice", "alice@example.com")),
-        ("/b.vcf", _vcard("bob-2", "Bob", "bob@example.com")),
-    ])
+def test_delete_contact_walks_listing_then_deletes(
+    stub_account, stub_books, monkeypatch
+):
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/a.vcf", _vcard("alice-1", "Alice", "alice@example.com")),
+            ("/b.vcf", _vcard("bob-2", "Bob", "bob@example.com")),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=204))
 
-    result = run(email_mcp.card_delete_contact(email_mcp.CardDeleteContactInput(
-        account_id=ACCT_ID, uid="bob-2", addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_delete_contact(
+            email_mcp.CardDeleteContactInput(
+                account_id=ACCT_ID,
+                uid="bob-2",
+                addressbook_name="Personal",
+            )
+        )
+    )
     assert len(client.delete_calls) == 1
     # Stayed on configured host (host pin invariant)
     assert client.delete_calls[0]["url"].startswith("https://dav.example.com/")
     assert "deleted" in result.lower()
 
 
-def test_delete_contact_uid_not_found_returns_message(stub_account, stub_books, monkeypatch):
-    _install_vcards(monkeypatch, [
-        ("/a.vcf", _vcard("alice-1", "Alice", "alice@example.com")),
-    ])
+def test_delete_contact_uid_not_found_returns_message(
+    stub_account, stub_books, monkeypatch
+):
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/a.vcf", _vcard("alice-1", "Alice", "alice@example.com")),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=204))
 
-    result = run(email_mcp.card_delete_contact(email_mcp.CardDeleteContactInput(
-        account_id=ACCT_ID, uid="ghost", addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_delete_contact(
+            email_mcp.CardDeleteContactInput(
+                account_id=ACCT_ID,
+                uid="ghost",
+                addressbook_name="Personal",
+            )
+        )
+    )
     assert "Contact with UID 'ghost' not found" in result
     assert client.delete_calls == []  # no DELETE issued for a missing target
 
@@ -322,17 +422,30 @@ def test_delete_contact_uid_not_found_returns_message(stub_account, stub_books, 
 # card_update_contact — coverage iteration 1 (issue #8)
 # ---------------------------------------------------------------------------
 
+
 def test_update_contact_changes_fn_only(stub_account, stub_books, monkeypatch):
     """Updating only fn preserves existing email; PUT lands on pinned host."""
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/c1.vcf",
-         _vcard("c1", "Alice Old", "alice@example.com")),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            (
+                "/dav/abooks/personal/c1.vcf",
+                _vcard("c1", "Alice Old", "alice@example.com"),
+            ),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=204))
 
-    result = run(email_mcp.card_update_contact(email_mcp.CardUpdateContactInput(
-        account_id=ACCT_ID, uid="c1", addressbook_name="Personal", fn="Alice New",
-    )))
+    result = run(
+        email_mcp.card_update_contact(
+            email_mcp.CardUpdateContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+                addressbook_name="Personal",
+                fn="Alice New",
+            )
+        )
+    )
 
     assert len(client.put_calls) == 1
     assert client.put_calls[0]["url"].startswith("https://dav.example.com/")
@@ -343,19 +456,32 @@ def test_update_contact_changes_fn_only(stub_account, stub_books, monkeypatch):
     assert "updated" in result.lower()
 
 
-def test_update_contact_replaces_email_and_tel_lists(stub_account, stub_books, monkeypatch):
+def test_update_contact_replaces_email_and_tel_lists(
+    stub_account, stub_books, monkeypatch
+):
     """Comma-separated email/tel replace existing values rather than appending."""
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/c1.vcf",
-         _vcard("c1", "Bob", "bob.old@example.com", "+15550001")),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            (
+                "/dav/abooks/personal/c1.vcf",
+                _vcard("c1", "Bob", "bob.old@example.com", "+15550001"),
+            ),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=204))
 
-    result = run(email_mcp.card_update_contact(email_mcp.CardUpdateContactInput(
-        account_id=ACCT_ID, uid="c1", addressbook_name="Personal",
-        email="b1@example.com, b2@example.com",
-        tel="+15550002, +15550003",
-    )))
+    result = run(
+        email_mcp.card_update_contact(
+            email_mcp.CardUpdateContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+                addressbook_name="Personal",
+                email="b1@example.com, b2@example.com",
+                tel="+15550002, +15550003",
+            )
+        )
+    )
 
     assert len(client.put_calls) == 1
     body = client.put_calls[0]["content"]
@@ -368,18 +494,29 @@ def test_update_contact_replaces_email_and_tel_lists(stub_account, stub_books, m
     assert "updated" in result.lower()
 
 
-def test_update_contact_adds_org_and_title_when_absent(stub_account, stub_books, monkeypatch):
+def test_update_contact_adds_org_and_title_when_absent(
+    stub_account, stub_books, monkeypatch
+):
     """vCard with no ORG/TITLE → fall through to vc.add() else-branch. Status 200."""
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/c1.vcf",
-         _vcard("c1", "Carol", "carol@example.com")),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/dav/abooks/personal/c1.vcf", _vcard("c1", "Carol", "carol@example.com")),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=200))
 
-    result = run(email_mcp.card_update_contact(email_mcp.CardUpdateContactInput(
-        account_id=ACCT_ID, uid="c1", addressbook_name="Personal",
-        org="Acme Inc", title="Engineer",
-    )))
+    result = run(
+        email_mcp.card_update_contact(
+            email_mcp.CardUpdateContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+                addressbook_name="Personal",
+                org="Acme Inc",
+                title="Engineer",
+            )
+        )
+    )
 
     assert len(client.put_calls) == 1
     body = client.put_calls[0]["content"]
@@ -388,7 +525,9 @@ def test_update_contact_adds_org_and_title_when_absent(stub_account, stub_books,
     assert "updated" in result.lower()
 
 
-def test_update_contact_overwrites_existing_org_and_title(stub_account, stub_books, monkeypatch):
+def test_update_contact_overwrites_existing_org_and_title(
+    stub_account, stub_books, monkeypatch
+):
     """vCard with existing ORG/TITLE → hasattr(vc, ...) True branch overwrites."""
     vcard_with_org = (
         "BEGIN:VCARD\r\n"
@@ -400,15 +539,25 @@ def test_update_contact_overwrites_existing_org_and_title(stub_account, stub_boo
         "TITLE:Old Title\r\n"
         "END:VCARD\r\n"
     )
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/c1.vcf", vcard_with_org),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/dav/abooks/personal/c1.vcf", vcard_with_org),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=204))
 
-    result = run(email_mcp.card_update_contact(email_mcp.CardUpdateContactInput(
-        account_id=ACCT_ID, uid="c1", addressbook_name="Personal",
-        org="New Co", title="New Title",
-    )))
+    result = run(
+        email_mcp.card_update_contact(
+            email_mcp.CardUpdateContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+                addressbook_name="Personal",
+                org="New Co",
+                title="New Title",
+            )
+        )
+    )
 
     assert len(client.put_calls) == 1
     body = client.put_calls[0]["content"]
@@ -419,61 +568,109 @@ def test_update_contact_overwrites_existing_org_and_title(stub_account, stub_boo
     assert "updated" in result.lower()
 
 
-def test_update_contact_uid_not_found_returns_message(stub_account, stub_books, monkeypatch):
+def test_update_contact_uid_not_found_returns_message(
+    stub_account, stub_books, monkeypatch
+):
     """When uid is not present in listing, the function bails before PUT."""
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/c1.vcf",
-         _vcard("alice-1", "Alice", "alice@example.com")),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            (
+                "/dav/abooks/personal/c1.vcf",
+                _vcard("alice-1", "Alice", "alice@example.com"),
+            ),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=204))
 
-    result = run(email_mcp.card_update_contact(email_mcp.CardUpdateContactInput(
-        account_id=ACCT_ID, uid="ghost", addressbook_name="Personal", fn="anything",
-    )))
+    result = run(
+        email_mcp.card_update_contact(
+            email_mcp.CardUpdateContactInput(
+                account_id=ACCT_ID,
+                uid="ghost",
+                addressbook_name="Personal",
+                fn="anything",
+            )
+        )
+    )
     assert "Contact with UID 'ghost' not found" in result
     assert client.put_calls == []
 
 
-def test_update_contact_server_error_reports_status(stub_account, stub_books, monkeypatch):
+def test_update_contact_server_error_reports_status(
+    stub_account, stub_books, monkeypatch
+):
     """Non-2xx response from PUT surfaces status code in the error string."""
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/c1.vcf",
-         _vcard("c1", "Alice", "alice@example.com")),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/dav/abooks/personal/c1.vcf", _vcard("c1", "Alice", "alice@example.com")),
+        ],
+    )
     _install_client(monkeypatch, _FakeResponse(status_code=507, text="quota"))
 
-    result = run(email_mcp.card_update_contact(email_mcp.CardUpdateContactInput(
-        account_id=ACCT_ID, uid="c1", addressbook_name="Personal", fn="Alice New",
-    )))
+    result = run(
+        email_mcp.card_update_contact(
+            email_mcp.CardUpdateContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+                addressbook_name="Personal",
+                fn="Alice New",
+            )
+        )
+    )
     assert "507" in result
     assert result.startswith("Error:")
 
 
-def test_update_contact_skips_unparseable_vcard_and_continues(stub_account, stub_books, monkeypatch):
+def test_update_contact_skips_unparseable_vcard_and_continues(
+    stub_account, stub_books, monkeypatch
+):
     """Malformed vCard mid-listing is skipped; loop continues to the next entry."""
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/garbage.vcf", "NOT A VCARD\n"),
-        ("/dav/abooks/personal/c2.vcf",
-         _vcard("c2", "Real Person", "real@example.com")),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/dav/abooks/personal/garbage.vcf", "NOT A VCARD\n"),
+            (
+                "/dav/abooks/personal/c2.vcf",
+                _vcard("c2", "Real Person", "real@example.com"),
+            ),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=204))
 
-    result = run(email_mcp.card_update_contact(email_mcp.CardUpdateContactInput(
-        account_id=ACCT_ID, uid="c2", addressbook_name="Personal", fn="New Name",
-    )))
+    result = run(
+        email_mcp.card_update_contact(
+            email_mcp.CardUpdateContactInput(
+                account_id=ACCT_ID,
+                uid="c2",
+                addressbook_name="Personal",
+                fn="New Name",
+            )
+        )
+    )
     assert len(client.put_calls) == 1
     assert "updated" in result.lower()
 
 
 def test_update_contact_outer_exception_returns_error_string(stub_account, monkeypatch):
     """Helper raising mid-flow is caught by outer except → error message."""
+
     async def boom(acct):
         raise RuntimeError("boom")
+
     monkeypatch.setattr(email_mcp, "_carddav_propfind", boom)
 
-    result = run(email_mcp.card_update_contact(email_mcp.CardUpdateContactInput(
-        account_id=ACCT_ID, uid="c1", addressbook_name="Personal", fn="x",
-    )))
+    result = run(
+        email_mcp.card_update_contact(
+            email_mcp.CardUpdateContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+                addressbook_name="Personal",
+                fn="x",
+            )
+        )
+    )
     assert result.startswith("Error updating contact:")
     assert "boom" in result
 
@@ -528,7 +725,9 @@ _PROPFIND_XML = """<?xml version="1.0" encoding="utf-8"?>
 
 def test_carddav_propfind_parses_addressbook_xml(stub_account, monkeypatch):
     """PROPFIND XML round-trip: two addressbooks parsed, non-AB collection skipped."""
-    client = _install_client(monkeypatch, _FakeResponse(status_code=200, text=_PROPFIND_XML))
+    client = _install_client(
+        monkeypatch, _FakeResponse(status_code=200, text=_PROPFIND_XML)
+    )
 
     result = run(email_mcp._carddav_propfind(ACCT))
 
@@ -601,7 +800,9 @@ END:VCARD&#13;
 
 def test_carddav_list_vcards_parses_report_xml(stub_account, monkeypatch):
     """REPORT XML round-trip: two vcards parsed, empty address-data entry skipped."""
-    client = _install_client(monkeypatch, _FakeResponse(status_code=200, text=_REPORT_XML))
+    client = _install_client(
+        monkeypatch, _FakeResponse(status_code=200, text=_REPORT_XML)
+    )
 
     result = run(email_mcp._carddav_list_vcards(ACCT, "/dav/abooks/personal/"))
 
@@ -640,19 +841,24 @@ def test_carddav_list_vcards_parse_error_returns_empty(stub_account, monkeypatch
 
 def _async_raise_factory(exc):
     """Return an async function that raises ``exc`` when awaited."""
+
     async def boom(*args, **kwargs):
         raise exc
+
     return boom
 
 
 def test_list_addressbooks_outer_except_returns_error(stub_account, monkeypatch):
     monkeypatch.setattr(
-        email_mcp, "_carddav_propfind",
+        email_mcp,
+        "_carddav_propfind",
         _async_raise_factory(RuntimeError("propfind boom")),
     )
-    result = run(email_mcp.card_list_addressbooks(
-        email_mcp.CardListAddressBooksInput(account_id=ACCT_ID)
-    ))
+    result = run(
+        email_mcp.card_list_addressbooks(
+            email_mcp.CardListAddressBooksInput(account_id=ACCT_ID)
+        )
+    )
     assert result.startswith("Error:")
     assert "propfind boom" in result
 
@@ -660,12 +866,16 @@ def test_list_addressbooks_outer_except_returns_error(stub_account, monkeypatch)
 def test_get_addressbook_href_raises_when_no_books(stub_account, monkeypatch):
     """No address books at all → _get_addressbook_href raises ValueError;
     card_list_contacts's outer except swallows and surfaces it."""
+
     async def empty(acct):
         return []
+
     monkeypatch.setattr(email_mcp, "_carddav_propfind", empty)
-    result = run(email_mcp.card_list_contacts(
-        email_mcp.CardListContactsInput(account_id=ACCT_ID)
-    ))
+    result = run(
+        email_mcp.card_list_contacts(
+            email_mcp.CardListContactsInput(account_id=ACCT_ID)
+        )
+    )
     assert result.startswith("Error:")
     assert "No address books found" in result
     assert ACCT_ID in result
@@ -676,11 +886,14 @@ def test_get_addressbook_href_raises_when_name_not_in_books(
 ):
     """addressbook_name not in propfind list → ValueError listing the
     available names; card_list_contacts's outer except surfaces it."""
-    result = run(email_mcp.card_list_contacts(
-        email_mcp.CardListContactsInput(
-            account_id=ACCT_ID, addressbook_name="DoesNotExist",
+    result = run(
+        email_mcp.card_list_contacts(
+            email_mcp.CardListContactsInput(
+                account_id=ACCT_ID,
+                addressbook_name="DoesNotExist",
+            )
         )
-    ))
+    )
     assert result.startswith("Error:")
     assert "Address book 'DoesNotExist' not found" in result
     assert "Personal" in result
@@ -689,24 +902,30 @@ def test_get_addressbook_href_raises_when_name_not_in_books(
 
 def test_card_search_contacts_outer_except_returns_error(stub_account, monkeypatch):
     monkeypatch.setattr(
-        email_mcp, "_get_addressbook_href",
+        email_mcp,
+        "_get_addressbook_href",
         _async_raise_factory(RuntimeError("search boom")),
     )
-    result = run(email_mcp.card_search_contacts(
-        email_mcp.CardSearchContactsInput(account_id=ACCT_ID, query="any")
-    ))
+    result = run(
+        email_mcp.card_search_contacts(
+            email_mcp.CardSearchContactsInput(account_id=ACCT_ID, query="any")
+        )
+    )
     assert result.startswith("Error:")
     assert "search boom" in result
 
 
 def test_card_get_contact_outer_except_returns_error(stub_account, monkeypatch):
     monkeypatch.setattr(
-        email_mcp, "_get_addressbook_href",
+        email_mcp,
+        "_get_addressbook_href",
         _async_raise_factory(RuntimeError("get boom")),
     )
-    result = run(email_mcp.card_get_contact(
-        email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="x")
-    ))
+    result = run(
+        email_mcp.card_get_contact(
+            email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="x")
+        )
+    )
     assert result.startswith("Error:")
     assert "get boom" in result
 
@@ -717,7 +936,9 @@ def test_card_get_contact_outer_except_returns_error(stub_account, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_get_contact_renders_org_and_title_when_present(stub_account, stub_books, monkeypatch):
+def test_get_contact_renders_org_and_title_when_present(
+    stub_account, stub_books, monkeypatch
+):
     """vCard with ORG and TITLE → those rendering branches fire (lines 3119-3122)."""
     vcard_with_org = (
         "BEGIN:VCARD\r\n"
@@ -731,12 +952,17 @@ def test_get_contact_renders_org_and_title_when_present(stub_account, stub_books
         "TITLE:Engineer\r\n"
         "END:VCARD\r\n"
     )
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/c1.vcf", vcard_with_org),
-    ])
-    result = run(email_mcp.card_get_contact(
-        email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="c1")
-    ))
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/dav/abooks/personal/c1.vcf", vcard_with_org),
+        ],
+    )
+    result = run(
+        email_mcp.card_get_contact(
+            email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="c1")
+        )
+    )
     assert "# Contact: Carol Org" in result
     assert "**Email**: carol@example.com" in result
     assert "**Phone**: +15550100" in result
@@ -744,32 +970,47 @@ def test_get_contact_renders_org_and_title_when_present(stub_account, stub_books
     assert "**Title**: Engineer" in result
 
 
-def test_get_contact_skips_vcards_that_fail_to_parse(stub_account, stub_books, monkeypatch):
+def test_get_contact_skips_vcards_that_fail_to_parse(
+    stub_account, stub_books, monkeypatch
+):
     """Malformed vCard → vobject.readOne raises → inner `continue` arm (3124-3125)."""
     valid = _vcard("c1", "Alice Valid", "alice@example.com")
-    _install_vcards(monkeypatch, [
-        ("/a.vcf", "garbage not a vcard"),  # vobject.readOne raises here
-        ("/b.vcf", valid),
-    ])
-    result = run(email_mcp.card_get_contact(
-        email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="c1")
-    ))
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/a.vcf", "garbage not a vcard"),  # vobject.readOne raises here
+            ("/b.vcf", valid),
+        ],
+    )
+    result = run(
+        email_mcp.card_get_contact(
+            email_mcp.CardGetContactInput(account_id=ACCT_ID, uid="c1")
+        )
+    )
     # The malformed entry was skipped; the valid one rendered.
     assert "# Contact: Alice Valid" in result
     assert "**Email**: alice@example.com" in result
 
 
-def test_create_contact_handles_tel_org_title_branches(stub_account, stub_books, monkeypatch):
+def test_create_contact_handles_tel_org_title_branches(
+    stub_account, stub_books, monkeypatch
+):
     """tel/org/title set → the conditional add branches all fire (3168-3177)."""
     client = _install_client(monkeypatch, _FakeResponse(status_code=201))
 
-    result = run(email_mcp.card_create_contact(email_mcp.CardCreateContactInput(
-        account_id=ACCT_ID, fn="Dave Multi", email="dave@example.com",
-        tel="+15550111, +15550222",
-        org="Acme",
-        title="Manager",
-        addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_create_contact(
+            email_mcp.CardCreateContactInput(
+                account_id=ACCT_ID,
+                fn="Dave Multi",
+                email="dave@example.com",
+                tel="+15550111, +15550222",
+                org="Acme",
+                title="Manager",
+                addressbook_name="Personal",
+            )
+        )
+    )
 
     assert len(client.put_calls) == 1
     body = client.put_calls[0]["content"]
@@ -782,30 +1023,52 @@ def test_create_contact_handles_tel_org_title_branches(stub_account, stub_books,
     assert "created" in result.lower()
 
 
-def test_delete_contact_returns_error_on_non_2xx_response(stub_account, stub_books, monkeypatch):
+def test_delete_contact_returns_error_on_non_2xx_response(
+    stub_account, stub_books, monkeypatch
+):
     """Server returns 403 → ``Error: Server returned 403`` (line 3338)."""
-    _install_vcards(monkeypatch, [
-        ("/a.vcf", _vcard("c1", "Alice", "alice@example.com")),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/a.vcf", _vcard("c1", "Alice", "alice@example.com")),
+        ],
+    )
     _install_client(monkeypatch, _FakeResponse(status_code=403, text="forbidden"))
 
-    result = run(email_mcp.card_delete_contact(email_mcp.CardDeleteContactInput(
-        account_id=ACCT_ID, uid="c1", addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_delete_contact(
+            email_mcp.CardDeleteContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+                addressbook_name="Personal",
+            )
+        )
+    )
     assert "Error: Server returned 403" in result
 
 
-def test_delete_contact_skips_vcards_that_fail_to_parse(stub_account, stub_books, monkeypatch):
+def test_delete_contact_skips_vcards_that_fail_to_parse(
+    stub_account, stub_books, monkeypatch
+):
     """Malformed vCard in the walk → inner `continue` arm (3324-3325)."""
-    _install_vcards(monkeypatch, [
-        ("/bad.vcf", "garbage not a vcard"),
-        ("/good.vcf", _vcard("c1", "Alice", "alice@example.com")),
-    ])
+    _install_vcards(
+        monkeypatch,
+        [
+            ("/bad.vcf", "garbage not a vcard"),
+            ("/good.vcf", _vcard("c1", "Alice", "alice@example.com")),
+        ],
+    )
     client = _install_client(monkeypatch, _FakeResponse(status_code=204))
 
-    result = run(email_mcp.card_delete_contact(email_mcp.CardDeleteContactInput(
-        account_id=ACCT_ID, uid="c1", addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_delete_contact(
+            email_mcp.CardDeleteContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+                addressbook_name="Personal",
+            )
+        )
+    )
     # The malformed entry was skipped; the valid one matched and was deleted.
     assert "deleted" in result.lower()
     assert len(client.delete_calls) == 1
@@ -818,26 +1081,42 @@ def test_delete_contact_skips_vcards_that_fail_to_parse(stub_account, stub_books
 
 
 def test_search_contacts_returns_friendly_message_when_empty(
-    stub_account, stub_books, monkeypatch,
+    stub_account,
+    stub_books,
+    monkeypatch,
 ):
     """Empty address book → 'No contacts found.' (line 3057)."""
     _install_vcards(monkeypatch, [])
-    result = run(email_mcp.card_search_contacts(email_mcp.CardSearchContactsInput(
-        account_id=ACCT_ID, query="alice", addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_search_contacts(
+            email_mcp.CardSearchContactsInput(
+                account_id=ACCT_ID,
+                query="alice",
+                addressbook_name="Personal",
+            )
+        )
+    )
     assert result == "No contacts found."
 
 
 def test_create_contact_without_email_omits_email_field(
-    stub_account, stub_books, monkeypatch,
+    stub_account,
+    stub_books,
+    monkeypatch,
 ):
     """``email=None`` → the `if params.email:` branch is false. Pins partial
     3168->3171."""
     client = _install_client(monkeypatch, _FakeResponse(status_code=201))
-    result = run(email_mcp.card_create_contact(email_mcp.CardCreateContactInput(
-        account_id=ACCT_ID, fn="Bob NoEmail", tel="+15550133",
-        addressbook_name="Personal",
-    )))
+    result = run(
+        email_mcp.card_create_contact(
+            email_mcp.CardCreateContactInput(
+                account_id=ACCT_ID,
+                fn="Bob NoEmail",
+                tel="+15550133",
+                addressbook_name="Personal",
+            )
+        )
+    )
     assert "created" in result.lower()
     assert len(client.put_calls) == 1
     body = client.put_calls[0]["content"]
@@ -848,24 +1127,39 @@ def test_create_contact_without_email_omits_email_field(
 
 def test_create_contact_outer_except_when_get_account_raises(monkeypatch):
     """``_get_account`` raises → 'Error creating contact: …' (lines 3199-3200)."""
+
     def _boom(aid):
         raise RuntimeError("acct boom")
+
     monkeypatch.setattr(email_mcp, "_get_account", _boom)
-    result = run(email_mcp.card_create_contact(email_mcp.CardCreateContactInput(
-        account_id=ACCT_ID, fn="x", email="x@example.com",
-    )))
+    result = run(
+        email_mcp.card_create_contact(
+            email_mcp.CardCreateContactInput(
+                account_id=ACCT_ID,
+                fn="x",
+                email="x@example.com",
+            )
+        )
+    )
     assert result.startswith("Error creating contact")
     assert "acct boom" in result
 
 
 def test_delete_contact_outer_except_when_get_account_raises(monkeypatch):
     """``_get_account`` raises → 'Error deleting contact: …' (lines 3341-3342)."""
+
     def _boom(aid):
         raise RuntimeError("del-acct boom")
+
     monkeypatch.setattr(email_mcp, "_get_account", _boom)
-    result = run(email_mcp.card_delete_contact(email_mcp.CardDeleteContactInput(
-        account_id=ACCT_ID, uid="c1",
-    )))
+    result = run(
+        email_mcp.card_delete_contact(
+            email_mcp.CardDeleteContactInput(
+                account_id=ACCT_ID,
+                uid="c1",
+            )
+        )
+    )
     assert result.startswith("Error deleting contact")
     assert "del-acct boom" in result
 
@@ -876,19 +1170,32 @@ def test_delete_contact_outer_except_when_get_account_raises(monkeypatch):
 
 
 def test_get_contact_omits_email_line_when_vcard_has_no_email(
-    stub_account, stub_books, monkeypatch,
+    stub_account,
+    stub_books,
+    monkeypatch,
 ):
     """vCard with no EMAIL field → the ``if c.get("email"):`` arm is False
     and the ``**Email**`` line is omitted from the rendered output. Pins
     partial 3115->3117 (skip the email-line append, fall through to the
     tel check)."""
-    _install_vcards(monkeypatch, [
-        ("/dav/abooks/personal/solo.vcf",
-         _vcard("solo-1", "Solo Contact", email_=None, tel="+15550100")),
-    ])
-    result = run(email_mcp.card_get_contact(email_mcp.CardGetContactInput(
-        account_id=ACCT_ID, uid="solo-1", addressbook_name="Personal",
-    )))
+    _install_vcards(
+        monkeypatch,
+        [
+            (
+                "/dav/abooks/personal/solo.vcf",
+                _vcard("solo-1", "Solo Contact", email_=None, tel="+15550100"),
+            ),
+        ],
+    )
+    result = run(
+        email_mcp.card_get_contact(
+            email_mcp.CardGetContactInput(
+                account_id=ACCT_ID,
+                uid="solo-1",
+                addressbook_name="Personal",
+            )
+        )
+    )
     assert "# Contact: Solo Contact" in result
     assert "**UID**: solo-1" in result
     assert "**Email**" not in result

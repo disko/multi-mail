@@ -9,6 +9,7 @@ responses so we can verify:
 - ``conn.logout()`` is always called (no socket leak),
 - error statuses surface as user-visible "Error: ..." strings.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +40,13 @@ ACCT = {
 }
 
 
-def _msg_bytes(*, frm="alice@example.com", subject="Hi", date="Mon, 13 May 2026 12:00:00 +0000", body="hello"):
+def _msg_bytes(
+    *,
+    frm="alice@example.com",
+    subject="Hi",
+    date="Mon, 13 May 2026 12:00:00 +0000",
+    body="hello",
+):
     msg = email.mime.text.MIMEText(body, "plain", "utf-8")
     msg["From"] = frm
     msg["To"] = "me@example.com"
@@ -109,15 +116,20 @@ def run(coro):
 # email_list_folders
 # ---------------------------------------------------------------------------
 
+
 def test_list_folders_returns_sorted_markdown(stub_account, monkeypatch):
-    fake = _FakeIMAP(list_resp=[
-        b'(\\HasNoChildren) "/" "Sent"',
-        b'(\\HasNoChildren) "/" "Drafts"',
-        b'(\\HasNoChildren) "/" "INBOX"',
-    ])
+    fake = _FakeIMAP(
+        list_resp=[
+            b'(\\HasNoChildren) "/" "Sent"',
+            b'(\\HasNoChildren) "/" "Drafts"',
+            b'(\\HasNoChildren) "/" "INBOX"',
+        ]
+    )
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     # Sorted alphabetically
     drafts_idx = result.index("- Drafts")
     inbox_idx = result.index("- INBOX")
@@ -133,13 +145,17 @@ def test_list_folders_parses_atom_form_names(stub_account, monkeypatch):
     the mailbox name; the old ``rsplit('"', 2)`` parser then extracts the
     delimiter ``/`` instead of the folder name.
     """
-    fake = _FakeIMAP(list_resp=[
-        b'(\\HasNoChildren) "/" INBOX',
-        b'(\\HasNoChildren) "/" Sent',
-    ])
+    fake = _FakeIMAP(
+        list_resp=[
+            b'(\\HasNoChildren) "/" INBOX',
+            b'(\\HasNoChildren) "/" Sent',
+        ]
+    )
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     assert "- INBOX" in result
     assert "- Sent" in result
     # The delimiter must NOT leak through as a folder name.
@@ -155,13 +171,17 @@ def test_list_folders_parses_literal_form_tuple(stub_account, monkeypatch):
     A mixed list (one tuple + one bytes entry) exercises both branches of the
     parser in a single response.
     """
-    fake = _FakeIMAP(list_resp=[
-        (b'(\\HasNoChildren) "/" {6}', b'Drafts'),
-        b'(\\HasNoChildren) "/" "INBOX"',
-    ])
+    fake = _FakeIMAP(
+        list_resp=[
+            (b'(\\HasNoChildren) "/" {6}', b"Drafts"),
+            b'(\\HasNoChildren) "/" "INBOX"',
+        ]
+    )
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     assert "- Drafts" in result
     assert "- INBOX" in result
     # Exactly two folder lines — nothing dropped, nothing extra.
@@ -171,13 +191,17 @@ def test_list_folders_parses_literal_form_tuple(stub_account, monkeypatch):
 
 def test_list_folders_parses_quoted_name_with_space(stub_account, monkeypatch):
     """A quoted name containing whitespace must survive intact."""
-    fake = _FakeIMAP(list_resp=[
-        b'(\\HasNoChildren) "/" "My Folder"',
-        b'(\\HasNoChildren) "/" "INBOX"',
-    ])
+    fake = _FakeIMAP(
+        list_resp=[
+            b'(\\HasNoChildren) "/" "My Folder"',
+            b'(\\HasNoChildren) "/" "INBOX"',
+        ]
+    )
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     assert "- My Folder" in result
     assert "- INBOX" in result
 
@@ -191,7 +215,9 @@ def test_list_folders_heading_falls_back_when_display_name_is_none(monkeypatch):
     fake = _FakeIMAP(list_resp=[b'(\\HasNoChildren) "/" "INBOX"'])
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     assert f"# Folders for {ACCT_ID}" in result
     assert "for None" not in result
 
@@ -201,10 +227,13 @@ def test_list_folders_surfaces_imap_error(stub_account, monkeypatch):
 
     def _broken_list(directory='""', pattern="*"):
         return ("NO", [b"server explosion"])
+
     fake.list = _broken_list
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID)))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     assert "Error: IMAP LIST failed" in result
     assert fake.logged_out is True
 
@@ -213,15 +242,20 @@ def test_list_folders_surfaces_imap_error(stub_account, monkeypatch):
 # email_search_messages
 # ---------------------------------------------------------------------------
 
+
 def test_search_forwards_query_verbatim_to_imap(stub_account, monkeypatch):
     fake = _FakeIMAP(search_uids=b"")
     _install_imap(monkeypatch, fake)
 
-    run(email_mcp.email_search_messages(email_mcp.SearchEmailsInput(
-        account_id=ACCT_ID,
-        query='FROM "alice@example.com"',
-        folder="INBOX",
-    )))
+    run(
+        email_mcp.email_search_messages(
+            email_mcp.SearchEmailsInput(
+                account_id=ACCT_ID,
+                query='FROM "alice@example.com"',
+                folder="INBOX",
+            )
+        )
+    )
     # one SEARCH call, with (None, 'FROM "alice..."')
     assert len(fake.search_calls) == 1
     args = fake.search_calls[0]
@@ -233,9 +267,14 @@ def test_search_forwards_query_verbatim_to_imap(stub_account, monkeypatch):
 
 def test_search_empty_result_shows_friendly_message(stub_account, monkeypatch):
     _install_imap(monkeypatch, _FakeIMAP(search_uids=b""))
-    result = run(email_mcp.email_search_messages(email_mcp.SearchEmailsInput(
-        account_id=ACCT_ID, query="UNSEEN",
-    )))
+    result = run(
+        email_mcp.email_search_messages(
+            email_mcp.SearchEmailsInput(
+                account_id=ACCT_ID,
+                query="UNSEEN",
+            )
+        )
+    )
     assert "No messages matching: UNSEEN" in result
 
 
@@ -248,9 +287,14 @@ def test_search_renders_markdown_table_for_hits(stub_account, monkeypatch):
         },
     )
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_search_messages(email_mcp.SearchEmailsInput(
-        account_id=ACCT_ID, query='SUBJECT "invoice"',
-    )))
+    result = run(
+        email_mcp.email_search_messages(
+            email_mcp.SearchEmailsInput(
+                account_id=ACCT_ID,
+                query='SUBJECT "invoice"',
+            )
+        )
+    )
     assert "| UID | From | Subject | Date |" in result
     assert "alice@example.com" in result
     assert "bob@example.com" in result
@@ -264,9 +308,15 @@ def test_search_results_are_newest_first_and_limited(stub_account, monkeypatch):
         fetch_bodies={str(i): _msg_bytes(subject=f"msg{i}") for i in range(1, 6)},
     )
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_search_messages(email_mcp.SearchEmailsInput(
-        account_id=ACCT_ID, query="ALL", limit=2,
-    )))
+    run(
+        email_mcp.email_search_messages(
+            email_mcp.SearchEmailsInput(
+                account_id=ACCT_ID,
+                query="ALL",
+                limit=2,
+            )
+        )
+    )
     # UIDs 5 and 4 fetched (newest first, limit=2). UIDs 1,2,3 NOT fetched.
     fetched_uids = [c[0] for c in fake.fetch_calls]
     assert fetched_uids == ["5", "4"]
@@ -276,38 +326,66 @@ def test_search_results_are_newest_first_and_limited(stub_account, monkeypatch):
 # email_read_message
 # ---------------------------------------------------------------------------
 
+
 def test_read_message_uses_peek_when_not_marking_read(stub_account, monkeypatch):
     fake = _FakeIMAP(fetch_bodies={"7": _msg_bytes(body="full body here")})
     _install_imap(monkeypatch, fake)
 
-    run(email_mcp.email_read_message(email_mcp.ReadEmailInput(
-        account_id=ACCT_ID, uid="7", folder="INBOX", mark_read=False,
-    )))
+    run(
+        email_mcp.email_read_message(
+            email_mcp.ReadEmailInput(
+                account_id=ACCT_ID,
+                uid="7",
+                folder="INBOX",
+                mark_read=False,
+            )
+        )
+    )
     # BODY.PEEK[] avoids setting \Seen; RFC822 would set it
     assert fake.fetch_calls[0][1] == "(BODY.PEEK[])"
     assert fake.select_readonly is True
 
 
-def test_read_message_uses_rfc822_and_writable_select_when_marking_read(stub_account, monkeypatch):
+def test_read_message_uses_rfc822_and_writable_select_when_marking_read(
+    stub_account, monkeypatch
+):
     fake = _FakeIMAP(fetch_bodies={"7": _msg_bytes()})
     _install_imap(monkeypatch, fake)
 
-    run(email_mcp.email_read_message(email_mcp.ReadEmailInput(
-        account_id=ACCT_ID, uid="7", folder="INBOX", mark_read=True,
-    )))
+    run(
+        email_mcp.email_read_message(
+            email_mcp.ReadEmailInput(
+                account_id=ACCT_ID,
+                uid="7",
+                folder="INBOX",
+                mark_read=True,
+            )
+        )
+    )
     assert fake.fetch_calls[0][1] == "(RFC822)"
     assert fake.select_readonly is False
 
 
 def test_read_message_includes_headers_and_body(stub_account, monkeypatch):
-    fake = _FakeIMAP(fetch_bodies={"42": _msg_bytes(
-        frm="alice@example.com", subject="hi there", body="message contents",
-    )})
+    fake = _FakeIMAP(
+        fetch_bodies={
+            "42": _msg_bytes(
+                frm="alice@example.com",
+                subject="hi there",
+                body="message contents",
+            )
+        }
+    )
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_read_message(email_mcp.ReadEmailInput(
-        account_id=ACCT_ID, uid="42",
-    )))
+    result = run(
+        email_mcp.email_read_message(
+            email_mcp.ReadEmailInput(
+                account_id=ACCT_ID,
+                uid="42",
+            )
+        )
+    )
     assert "**From**: alice@example.com" in result
     assert "**Subject**: hi there" in result
     assert "message contents" in result
@@ -317,9 +395,14 @@ def test_read_message_missing_uid_returns_error(stub_account, monkeypatch):
     fake = _FakeIMAP(fetch_bodies={})  # nothing on the server
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_read_message(email_mcp.ReadEmailInput(
-        account_id=ACCT_ID, uid="999",
-    )))
+    result = run(
+        email_mcp.email_read_message(
+            email_mcp.ReadEmailInput(
+                account_id=ACCT_ID,
+                uid="999",
+            )
+        )
+    )
     assert "Error: Could not fetch message UID 999" in result
     assert fake.logged_out is True
 
@@ -336,43 +419,53 @@ def test_read_message_missing_uid_returns_error(stub_account, monkeypatch):
 
 def _raising_imap(monkeypatch, exc):
     """Override _imap_connect to raise ``exc`` on the next call."""
+
     def boom(acct):
         raise exc
+
     monkeypatch.setattr(email_mcp, "_imap_connect", boom)
 
 
 def test_list_folders_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom list folders"))
-    result = run(email_mcp.email_list_folders(
-        email_mcp.ListFoldersInput(account_id=ACCT_ID)
-    ))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     assert result.startswith("Error:")
     assert "boom list folders" in result
 
 
 def test_list_messages_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom list msgs"))
-    result = run(email_mcp.email_list_messages(
-        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_list_messages(
+            email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+        )
+    )
     assert result.startswith("Error:")
     assert "boom list msgs" in result
 
 
-def test_search_messages_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
+def test_search_messages_outer_except_when_imap_connect_raises(
+    stub_account, monkeypatch
+):
     _raising_imap(monkeypatch, RuntimeError("boom search"))
-    result = run(email_mcp.email_search_messages(
-        email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
-    ))
+    result = run(
+        email_mcp.email_search_messages(
+            email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
+        )
+    )
     assert result.startswith("Error:")
     assert "boom search" in result
 
 
 def test_read_message_outer_except_when_imap_connect_raises(stub_account, monkeypatch):
     _raising_imap(monkeypatch, RuntimeError("boom read"))
-    result = run(email_mcp.email_read_message(
-        email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="1")
-    ))
+    result = run(
+        email_mcp.email_read_message(
+            email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="1")
+        )
+    )
     assert result.startswith("Error:")
     assert "boom read" in result
 
@@ -388,8 +481,10 @@ def test_read_message_outer_except_when_imap_connect_raises(stub_account, monkey
 
 def _make_logout_raiser(fake, exc):
     """Replace ``fake.logout`` with one that raises ``exc``."""
+
     def _raise():
         raise exc
+
     fake.logout = _raise
 
 
@@ -397,9 +492,9 @@ def test_list_folders_swallows_logout_exception(stub_account, monkeypatch):
     fake = _FakeIMAP(list_resp=[b'(\\HasNoChildren) "/" "INBOX"'])
     _make_logout_raiser(fake, OSError("logout fail"))
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_list_folders(
-        email_mcp.ListFoldersInput(account_id=ACCT_ID)
-    ))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     # Happy-path output still rendered — the swallow caught OSError.
     assert "- INBOX" in result
     assert not result.startswith("Error:")
@@ -412,9 +507,11 @@ def test_list_messages_swallows_logout_exception(stub_account, monkeypatch):
     )
     _make_logout_raiser(fake, OSError("logout fail"))
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_list_messages(
-        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_list_messages(
+            email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+        )
+    )
     assert "| UID | From | Subject | Date |" in result
     assert not result.startswith("Error:")
 
@@ -423,9 +520,11 @@ def test_read_message_swallows_logout_exception(stub_account, monkeypatch):
     fake = _FakeIMAP(fetch_bodies={"7": _msg_bytes(body="hello world")})
     _make_logout_raiser(fake, OSError("logout fail"))
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_read_message(
-        email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="7", mark_read=False)
-    ))
+    result = run(
+        email_mcp.email_read_message(
+            email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="7", mark_read=False)
+        )
+    )
     assert "hello world" in result
     assert not result.startswith("Error:")
 
@@ -443,12 +542,15 @@ def test_list_messages_returns_error_on_search_failure(stub_account, monkeypatch
         if cmd == "SEARCH":
             return ("NO", [b"server busy"])
         return ("OK", [None])
+
     fake.uid = _bad_uid
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_list_messages(
-        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_list_messages(
+            email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+        )
+    )
     assert "Error: SEARCH failed" in result
 
 
@@ -459,28 +561,40 @@ def test_list_messages_skips_fetch_failures_via_continue(stub_account, monkeypat
         fetch_bodies={"5": _msg_bytes(subject="kept")},
     )
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_list_messages(
-        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_list_messages(
+            email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+        )
+    )
     # Both UIDs were fetched (loop ran), but only UID 5 rendered.
     fetched = [c[0] for c in fake.fetch_calls]
     assert set(fetched) == {"4", "5"}
     assert "kept" in result
     # Only one data row in the markdown table — UID 4 was skipped.
-    body_rows = [ln for ln in result.splitlines() if ln.startswith("| ") and "UID" not in ln and "---" not in ln]
+    body_rows = [
+        ln
+        for ln in result.splitlines()
+        if ln.startswith("| ") and "UID" not in ln and "---" not in ln
+    ]
     assert len(body_rows) == 1
 
 
-def test_list_messages_shows_pagination_hint_when_more_available(stub_account, monkeypatch):
+def test_list_messages_shows_pagination_hint_when_more_available(
+    stub_account, monkeypatch
+):
     # 11 UIDs, limit=5 → 6 unrendered → "More messages available" hint fires.
     fake = _FakeIMAP(
         search_uids=b" ".join(str(i).encode() for i in range(1, 12)),
         fetch_bodies={str(i): _msg_bytes(subject=f"m{i}") for i in range(1, 12)},
     )
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_list_messages(
-        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX", limit=5, offset=0)
-    ))
+    result = run(
+        email_mcp.email_list_messages(
+            email_mcp.ListEmailsInput(
+                account_id=ACCT_ID, folder="INBOX", limit=5, offset=0
+            )
+        )
+    )
     assert "More messages available" in result
     assert "offset=5" in result
 
@@ -492,12 +606,15 @@ def test_search_messages_returns_error_on_search_failure(stub_account, monkeypat
         if cmd == "SEARCH":
             return ("NO", [b"server busy"])
         return ("OK", [None])
+
     fake.uid = _bad_uid
     _install_imap(monkeypatch, fake)
 
-    result = run(email_mcp.email_search_messages(
-        email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
-    ))
+    result = run(
+        email_mcp.email_search_messages(
+            email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
+        )
+    )
     assert "Error: SEARCH failed" in result
 
 
@@ -507,11 +624,17 @@ def test_search_messages_skips_fetch_failures_via_continue(stub_account, monkeyp
         fetch_bodies={"5": _msg_bytes(subject="searched")},
     )
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_search_messages(
-        email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
-    ))
+    result = run(
+        email_mcp.email_search_messages(
+            email_mcp.SearchEmailsInput(account_id=ACCT_ID, query="ALL")
+        )
+    )
     assert "searched" in result
-    body_rows = [ln for ln in result.splitlines() if ln.startswith("| ") and "UID" not in ln and "---" not in ln]
+    body_rows = [
+        ln
+        for ln in result.splitlines()
+        if ln.startswith("| ") and "UID" not in ln and "---" not in ln
+    ]
     assert len(body_rows) == 1
 
 
@@ -525,9 +648,11 @@ def test_list_messages_empty_folder_returns_friendly_message(stub_account, monke
     Pins line 1596."""
     fake = _FakeIMAP(search_uids=b"")
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_list_messages(
-        email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_list_messages(
+            email_mcp.ListEmailsInput(account_id=ACCT_ID, folder="INBOX")
+        )
+    )
     assert result == "No messages in INBOX."
 
 
@@ -537,9 +662,11 @@ def test_read_message_no_cc_omits_cc_line(stub_account, monkeypatch):
     # _msg_bytes default has no Cc.
     fake = _FakeIMAP(fetch_bodies={"7": _msg_bytes(subject="no-cc")})
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_read_message(
-        email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="7", folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_read_message(
+            email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="7", folder="INBOX")
+        )
+    )
     assert "**Subject**: no-cc" in result
     assert "**CC**" not in result
 
@@ -548,6 +675,7 @@ def test_read_message_with_cc_renders_cc_line(stub_account, monkeypatch):
     """A message WITH a Cc header must render '**CC**:'. Pins the true arm
     of `if msg.get("Cc"):` at line 1746."""
     import email.mime.text
+
     msg = email.mime.text.MIMEText("body", "plain", "utf-8")
     msg["From"] = "alice@example.com"
     msg["To"] = "me@example.com"
@@ -557,9 +685,11 @@ def test_read_message_with_cc_renders_cc_line(stub_account, monkeypatch):
 
     fake = _FakeIMAP(fetch_bodies={"8": msg.as_bytes()})
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_read_message(
-        email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="8", folder="INBOX")
-    ))
+    result = run(
+        email_mcp.email_read_message(
+            email_mcp.ReadEmailInput(account_id=ACCT_ID, uid="8", folder="INBOX")
+        )
+    )
     assert "**CC**: cc@example.com" in result
 
 
@@ -573,14 +703,16 @@ def test_list_folders_drops_items_that_parse_to_none(stub_account, monkeypatch):
     valid item shows up, the unparseable item is silently dropped (no
     error, no garbage folder entry). Pins partial 1466->1464 (the
     `if name:` false-arm — name is None so the append is skipped)."""
-    fake = _FakeIMAP(list_resp=[
-        b'(\\HasNoChildren) "/" "INBOX"',
-        b'(unbalanced',  # _parse_imap_list_line returns None
-    ])
+    fake = _FakeIMAP(
+        list_resp=[
+            b'(\\HasNoChildren) "/" "INBOX"',
+            b"(unbalanced",  # _parse_imap_list_line returns None
+        ]
+    )
     _install_imap(monkeypatch, fake)
-    result = run(email_mcp.email_list_folders(
-        email_mcp.ListFoldersInput(account_id=ACCT_ID)
-    ))
+    result = run(
+        email_mcp.email_list_folders(email_mcp.ListFoldersInput(account_id=ACCT_ID))
+    )
     assert "- INBOX" in result
     # Exactly one folder line — the unparseable item was dropped.
     folder_lines = [ln for ln in result.splitlines() if ln.startswith("- ")]

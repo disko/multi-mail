@@ -33,9 +33,10 @@ import smtplib
 import socket
 import ssl
 from defusedxml import ElementTree as ET
-from xml.etree.ElementTree import Element as _XmlElement  # type-only; parsing goes through defusedxml
+from xml.etree.ElementTree import (
+    Element as _XmlElement,
+)  # type-only; parsing goes through defusedxml
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -64,6 +65,7 @@ mcp = FastMCP("email_mcp")
 # Account storage helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_accounts() -> List[Dict[str, Any]]:
     """Load accounts from the JSON config file."""
     path = Path(CONFIG_PATH).expanduser()
@@ -89,7 +91,9 @@ def _save_accounts(accounts: List[Dict[str, Any]]) -> None:
     # reader. See SECURITY.md.
     if os.name == "posix":
         try:
-            os.chmod(path.parent, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+            os.chmod(
+                path.parent, 0o700
+            )  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
         except OSError:
             pass
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -123,6 +127,7 @@ def _get_account(account_id: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # IMAP / SMTP connection helpers
 # ---------------------------------------------------------------------------
+
 
 def _imap_connect(acct: Dict[str, Any]) -> imaplib.IMAP4:
     """Return an authenticated IMAP connection for *acct*."""
@@ -230,7 +235,7 @@ def _sieve_connect(acct: Dict[str, Any]) -> ms.MANAGESIEVE:
             hint = (
                 f" The account has sieve_security={security!r}; most servers "
                 f"require STARTTLS before advertising SASL mechanisms. Try "
-                f"setting sieve_security to \"starttls\" in accounts.json."
+                f'setting sieve_security to "starttls" in accounts.json.'
             )
         raise ConnectionError(
             f"ManageSieve server advertised no SASL mechanisms — cannot "
@@ -269,7 +274,9 @@ def _caldav_client(acct: Dict[str, Any]) -> caldav.DAVClient:
     )
 
 
-def _carddav_headers(acct: Dict[str, Any]) -> Tuple[str, Dict[str, str], httpx.BasicAuth]:
+def _carddav_headers(
+    acct: Dict[str, Any],
+) -> Tuple[str, Dict[str, str], httpx.BasicAuth]:
     """Return (base_url, headers, auth) for CardDAV requests."""
     url = acct.get("carddav_url")
     if not url:
@@ -286,6 +293,7 @@ def _carddav_headers(acct: Dict[str, Any]) -> Tuple[str, Dict[str, str], httpx.B
 # CalDAV / iCalendar helpers
 # ---------------------------------------------------------------------------
 
+
 def _format_event(event: caldav.Event) -> Dict[str, str]:
     """Extract a summary dict from a caldav Event."""
     try:
@@ -293,11 +301,17 @@ def _format_event(event: caldav.Event) -> Dict[str, str]:
         vevent = vcal.vevent
         result = {
             "uid": "",
-            "summary": str(getattr(vevent.summary, "value", "")) if hasattr(vevent, "summary") else "",
+            "summary": str(getattr(vevent.summary, "value", ""))
+            if hasattr(vevent, "summary")
+            else "",
             "dtstart": "",
             "dtend": "",
-            "location": str(getattr(vevent.location, "value", "")) if hasattr(vevent, "location") else "",
-            "description": str(getattr(vevent.description, "value", "")) if hasattr(vevent, "description") else "",
+            "location": str(getattr(vevent.location, "value", ""))
+            if hasattr(vevent, "location")
+            else "",
+            "description": str(getattr(vevent.description, "value", ""))
+            if hasattr(vevent, "description")
+            else "",
         }
         if hasattr(vevent, "uid"):
             result["uid"] = str(vevent.uid.value)
@@ -335,6 +349,7 @@ def _format_contact(vcard_data: str) -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 # Mail parsing helpers
 # ---------------------------------------------------------------------------
+
 
 def _decode_header(raw: Optional[str]) -> str:
     """Decode an RFC-2047 encoded header value.
@@ -464,7 +479,9 @@ def _parse_imap_list_line(item: Any) -> Optional[str]:
     # Atom: per RFC 3501 §9, atoms contain no whitespace; take the last
     # token to be defensive against trailing whitespace/CRLF residue.
     tokens = text.split()
-    if not tokens:  # pragma: no cover -- text was lstripped + truthy, so split() yields >=1 token
+    if (
+        not tokens
+    ):  # pragma: no cover -- text was lstripped + truthy, so split() yields >=1 token
         return None
     return tokens[-1]
 
@@ -502,7 +519,11 @@ def _resolve_trash_folder(
             for item in data:
                 if isinstance(item, (bytes, bytearray)):
                     text = bytes(item).decode("utf-8", errors="replace")
-                elif isinstance(item, tuple) and item and isinstance(item[0], (bytes, bytearray)):
+                elif (
+                    isinstance(item, tuple)
+                    and item
+                    and isinstance(item[0], (bytes, bytearray))
+                ):
                     text = bytes(item[0]).decode("utf-8", errors="replace")
                 else:
                     continue
@@ -520,6 +541,7 @@ def _resolve_trash_folder(
 # Pydantic input models
 # ---------------------------------------------------------------------------
 
+
 class AccountIdMixin(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     account_id: str = Field(
@@ -531,18 +553,23 @@ class AccountIdMixin(BaseModel):
 
 class ListFoldersInput(AccountIdMixin):
     """Input for listing IMAP folders."""
+
     pass
 
 
 class ListEmailsInput(AccountIdMixin):
     """Input for listing emails in a folder."""
+
     folder: str = Field(default="INBOX", description="IMAP folder name")
     limit: int = Field(default=20, description="Max messages to return", ge=1, le=200)
-    offset: int = Field(default=0, description="Number of messages to skip (from most recent)", ge=0)
+    offset: int = Field(
+        default=0, description="Number of messages to skip (from most recent)", ge=0
+    )
 
 
 class SearchEmailsInput(AccountIdMixin):
     """Input for searching emails via IMAP SEARCH."""
+
     query: str = Field(
         ...,
         description=(
@@ -551,7 +578,7 @@ class SearchEmailsInput(AccountIdMixin):
             "'SUBJECT \"invoice\"', "
             "'SINCE 01-Jan-2025', "
             "'UNSEEN', "
-            "'OR FROM \"bob\" SUBJECT \"urgent\"'"
+            '\'OR FROM "bob" SUBJECT "urgent"\''
         ),
         min_length=1,
     )
@@ -561,22 +588,37 @@ class SearchEmailsInput(AccountIdMixin):
 
 class ReadEmailInput(AccountIdMixin):
     """Input for reading a single email by UID."""
-    uid: str = Field(..., description="Message UID (from list or search results)", min_length=1)
-    folder: str = Field(default="INBOX", description="IMAP folder containing the message")
-    mark_read: bool = Field(default=True, description="Mark the message as read (\\Seen flag)")
+
+    uid: str = Field(
+        ..., description="Message UID (from list or search results)", min_length=1
+    )
+    folder: str = Field(
+        default="INBOX", description="IMAP folder containing the message"
+    )
+    mark_read: bool = Field(
+        default=True, description="Mark the message as read (\\Seen flag)"
+    )
 
 
 class SendEmailInput(AccountIdMixin):
     """Input for composing and sending a new email."""
-    to: str = Field(..., description="Recipient address(es), comma-separated", min_length=1)
+
+    to: str = Field(
+        ..., description="Recipient address(es), comma-separated", min_length=1
+    )
     subject: str = Field(..., description="Email subject line")
     body: str = Field(..., description="Plain-text email body", min_length=1)
-    cc: Optional[str] = Field(default=None, description="CC address(es), comma-separated")
-    bcc: Optional[str] = Field(default=None, description="BCC address(es), comma-separated")
+    cc: Optional[str] = Field(
+        default=None, description="CC address(es), comma-separated"
+    )
+    bcc: Optional[str] = Field(
+        default=None, description="BCC address(es), comma-separated"
+    )
 
 
 class ReplyEmailInput(AccountIdMixin):
     """Input for replying to an existing email."""
+
     uid: str = Field(..., description="UID of the message to reply to", min_length=1)
     folder: str = Field(default="INBOX", description="Folder of the original message")
     body: str = Field(..., description="Reply body text", min_length=1)
@@ -585,14 +627,18 @@ class ReplyEmailInput(AccountIdMixin):
 
 class ForwardEmailInput(AccountIdMixin):
     """Input for forwarding an existing email."""
+
     uid: str = Field(..., description="UID of the message to forward", min_length=1)
     folder: str = Field(default="INBOX", description="Folder of the original message")
-    to: str = Field(..., description="Recipient address(es), comma-separated", min_length=1)
+    to: str = Field(
+        ..., description="Recipient address(es), comma-separated", min_length=1
+    )
     body: Optional[str] = Field(default=None, description="Optional note to prepend")
 
 
 class MoveEmailInput(AccountIdMixin):
     """Input for moving an email between folders."""
+
     uid: str = Field(..., description="UID of the message to move", min_length=1)
     source_folder: str = Field(default="INBOX", description="Current folder")
     dest_folder: str = Field(..., description="Destination folder", min_length=1)
@@ -600,6 +646,7 @@ class MoveEmailInput(AccountIdMixin):
 
 class DeleteEmailInput(AccountIdMixin):
     """Input for deleting a message — move to Trash by default, permanent if flagged."""
+
     uid: str = Field(..., description="UID of the message to delete", min_length=1)
     folder: str = Field(default="INBOX", description="Folder containing the message")
     permanent: bool = Field(
@@ -621,6 +668,7 @@ class DeleteEmailInput(AccountIdMixin):
 
 class ExpungeInput(AccountIdMixin):
     """Input for issuing a (UID-scoped or bare) EXPUNGE on an IMAP folder."""
+
     uid: Optional[str] = Field(
         default=None,
         description=(
@@ -641,7 +689,7 @@ class ExpungeInput(AccountIdMixin):
 # Characters that may not appear inside an IMAP flag atom (RFC 3501 §9
 # `atom-specials`). Whitespace, parens, brace literals, and the listed
 # control characters all break the wire protocol if sent verbatim.
-_FLAG_ATOM_FORBIDDEN = set(" \t\r\n()[]{}\"%*")
+_FLAG_ATOM_FORBIDDEN = set(' \t\r\n()[]{}"%*')
 
 
 def _validate_flag_atom(flag: str) -> str:
@@ -676,6 +724,7 @@ class ModifyFlagsInput(AccountIdMixin):
     ``follow-up``. The tool does NOT expunge: setting ``\\Deleted`` here
     sticks until a later move/expunge.
     """
+
     uid: str = Field(..., description="UID of the message to modify", min_length=1)
     folder: str = Field(default="INBOX", description="Folder containing the message")
     add_flags: List[str] = Field(
@@ -703,39 +752,83 @@ class ModifyFlagsInput(AccountIdMixin):
 
 class CreateFolderInput(AccountIdMixin):
     """Input for creating an IMAP folder."""
-    folder: str = Field(..., description="New folder name (use / for hierarchy)", min_length=1)
+
+    folder: str = Field(
+        ..., description="New folder name (use / for hierarchy)", min_length=1
+    )
 
 
 class DeleteFolderInput(AccountIdMixin):
     """Input for deleting an IMAP folder."""
+
     folder: str = Field(..., description="Folder to delete", min_length=1)
 
 
 class AddAccountInput(BaseModel):
     """Input for adding a new email account."""
+
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    id: str = Field(..., description="Short unique identifier for this account (e.g. 'work', 'personal')", min_length=1, max_length=64)
-    display_name: Optional[str] = Field(default=None, description="Friendly display name")
+    id: str = Field(
+        ...,
+        description="Short unique identifier for this account (e.g. 'work', 'personal')",
+        min_length=1,
+        max_length=64,
+    )
+    display_name: Optional[str] = Field(
+        default=None, description="Friendly display name"
+    )
     email_address: str = Field(..., description="Full email address", min_length=3)
-    username: str = Field(..., description="Login username (often the email address)", min_length=1)
-    password: str = Field(..., description="Login password or app password", min_length=1)
+    username: str = Field(
+        ..., description="Login username (often the email address)", min_length=1
+    )
+    password: str = Field(
+        ..., description="Login password or app password", min_length=1
+    )
     imap_host: str = Field(..., description="IMAP server hostname", min_length=1)
     imap_port: int = Field(default=993, description="IMAP port", ge=1, le=65535)
-    imap_security: str = Field(default="ssl", description="IMAP security: 'ssl', 'starttls', or 'none'")
-    imap_allow_insecure: bool = Field(default=False, description="Skip TLS certificate verification for IMAP")
+    imap_security: str = Field(
+        default="ssl", description="IMAP security: 'ssl', 'starttls', or 'none'"
+    )
+    imap_allow_insecure: bool = Field(
+        default=False, description="Skip TLS certificate verification for IMAP"
+    )
     smtp_host: str = Field(..., description="SMTP server hostname", min_length=1)
     smtp_port: int = Field(default=587, description="SMTP port", ge=1, le=65535)
-    smtp_security: str = Field(default="starttls", description="SMTP security: 'ssl', 'starttls', or 'none'")
-    smtp_allow_insecure: bool = Field(default=False, description="Skip TLS certificate verification for SMTP")
-    trash_folder: Optional[str] = Field(default=None, description="Override server-side Trash folder name (falls back to SPECIAL-USE \\Trash, then 'Trash')")
-    sieve_host: Optional[str] = Field(default=None, description="ManageSieve server hostname (defaults to IMAP host)")
-    sieve_port: int = Field(default=4190, description="ManageSieve port", ge=1, le=65535)
-    sieve_security: str = Field(default="starttls", description="ManageSieve security: 'starttls' or 'none'")
-    sieve_allow_insecure: bool = Field(default=False, description="Skip TLS certificate verification for ManageSieve")
-    caldav_url: Optional[str] = Field(default=None, description="CalDAV server URL (e.g. 'https://mail.example.com/SOGo/dav/user/Calendar')")
-    carddav_url: Optional[str] = Field(default=None, description="CardDAV server URL (e.g. 'https://mail.example.com/SOGo/dav/user/Contacts')")
-    dav_allow_insecure: bool = Field(default=False, description="Skip TLS certificate verification for CalDAV/CardDAV")
+    smtp_security: str = Field(
+        default="starttls", description="SMTP security: 'ssl', 'starttls', or 'none'"
+    )
+    smtp_allow_insecure: bool = Field(
+        default=False, description="Skip TLS certificate verification for SMTP"
+    )
+    trash_folder: Optional[str] = Field(
+        default=None,
+        description="Override server-side Trash folder name (falls back to SPECIAL-USE \\Trash, then 'Trash')",
+    )
+    sieve_host: Optional[str] = Field(
+        default=None, description="ManageSieve server hostname (defaults to IMAP host)"
+    )
+    sieve_port: int = Field(
+        default=4190, description="ManageSieve port", ge=1, le=65535
+    )
+    sieve_security: str = Field(
+        default="starttls", description="ManageSieve security: 'starttls' or 'none'"
+    )
+    sieve_allow_insecure: bool = Field(
+        default=False, description="Skip TLS certificate verification for ManageSieve"
+    )
+    caldav_url: Optional[str] = Field(
+        default=None,
+        description="CalDAV server URL (e.g. 'https://mail.example.com/SOGo/dav/user/Calendar')",
+    )
+    carddav_url: Optional[str] = Field(
+        default=None,
+        description="CardDAV server URL (e.g. 'https://mail.example.com/SOGo/dav/user/Contacts')",
+    )
+    dav_allow_insecure: bool = Field(
+        default=False,
+        description="Skip TLS certificate verification for CalDAV/CardDAV",
+    )
 
     @field_validator("imap_security", "smtp_security", "sieve_security")
     @classmethod
@@ -753,6 +846,7 @@ class RemoveAccountInput(BaseModel):
 
 class AutodiscoverInput(BaseModel):
     """Input for email autodiscovery."""
+
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     email_address: str = Field(
         ...,
@@ -763,17 +857,24 @@ class AutodiscoverInput(BaseModel):
 
 class SieveListInput(AccountIdMixin):
     """Input for listing Sieve scripts."""
+
     pass
 
 
 class SieveGetInput(AccountIdMixin):
     """Input for retrieving a Sieve script."""
-    script_name: str = Field(..., description="Name of the Sieve script to retrieve", min_length=1)
+
+    script_name: str = Field(
+        ..., description="Name of the Sieve script to retrieve", min_length=1
+    )
 
 
 class SievePutInput(AccountIdMixin):
     """Input for uploading a Sieve script."""
-    script_name: str = Field(..., description="Name for the script on the server", min_length=1)
+
+    script_name: str = Field(
+        ..., description="Name for the script on the server", min_length=1
+    )
     script_content: str = Field(
         ...,
         description=(
@@ -785,11 +886,14 @@ class SievePutInput(AccountIdMixin):
         ),
         min_length=1,
     )
-    activate: bool = Field(default=False, description="Immediately set this script as the active script")
+    activate: bool = Field(
+        default=False, description="Immediately set this script as the active script"
+    )
 
 
 class SieveActivateInput(AccountIdMixin):
     """Input for activating a Sieve script."""
+
     script_name: str = Field(
         ...,
         description="Name of the script to activate (empty string to deactivate all)",
@@ -798,40 +902,60 @@ class SieveActivateInput(AccountIdMixin):
 
 class SieveDeleteInput(AccountIdMixin):
     """Input for deleting a Sieve script."""
-    script_name: str = Field(..., description="Name of the script to delete", min_length=1)
+
+    script_name: str = Field(
+        ..., description="Name of the script to delete", min_length=1
+    )
 
 
 class SieveRenameInput(AccountIdMixin):
     """Input for renaming a Sieve script."""
+
     old_name: str = Field(..., description="Current script name", min_length=1)
     new_name: str = Field(..., description="New script name", min_length=1)
 
 
 # -- CalDAV input models --
 
+
 class CalListCalendarsInput(AccountIdMixin):
     """Input for listing CalDAV calendars."""
+
     pass
 
 
 class CalListEventsInput(AccountIdMixin):
     """Input for listing events in a calendar."""
-    calendar_name: Optional[str] = Field(default=None, description="Calendar name (default: first/primary calendar)")
-    start: Optional[str] = Field(default=None, description="Start date in YYYY-MM-DD format (default: today)")
-    end: Optional[str] = Field(default=None, description="End date in YYYY-MM-DD format (default: 30 days from start)")
+
+    calendar_name: Optional[str] = Field(
+        default=None, description="Calendar name (default: first/primary calendar)"
+    )
+    start: Optional[str] = Field(
+        default=None, description="Start date in YYYY-MM-DD format (default: today)"
+    )
+    end: Optional[str] = Field(
+        default=None,
+        description="End date in YYYY-MM-DD format (default: 30 days from start)",
+    )
 
 
 class CalGetEventInput(AccountIdMixin):
     """Input for reading a single event."""
+
     uid: str = Field(..., description="Event UID", min_length=1)
     calendar_name: Optional[str] = Field(default=None, description="Calendar name")
 
 
 class CalCreateEventInput(AccountIdMixin):
     """Input for creating a calendar event."""
+
     summary: str = Field(..., description="Event title", min_length=1)
-    dtstart: str = Field(..., description="Start datetime in ISO format (e.g. '2026-03-20T14:00:00')")
-    dtend: str = Field(..., description="End datetime in ISO format (e.g. '2026-03-20T15:00:00')")
+    dtstart: str = Field(
+        ..., description="Start datetime in ISO format (e.g. '2026-03-20T14:00:00')"
+    )
+    dtend: str = Field(
+        ..., description="End datetime in ISO format (e.g. '2026-03-20T15:00:00')"
+    )
     calendar_name: Optional[str] = Field(default=None, description="Calendar name")
     location: Optional[str] = Field(default=None, description="Event location")
     description: Optional[str] = Field(default=None, description="Event description")
@@ -839,6 +963,7 @@ class CalCreateEventInput(AccountIdMixin):
 
 class CalUpdateEventInput(AccountIdMixin):
     """Input for updating an existing event."""
+
     uid: str = Field(..., description="UID of the event to update", min_length=1)
     calendar_name: Optional[str] = Field(default=None, description="Calendar name")
     summary: Optional[str] = Field(default=None, description="New title")
@@ -850,50 +975,76 @@ class CalUpdateEventInput(AccountIdMixin):
 
 class CalDeleteEventInput(AccountIdMixin):
     """Input for deleting an event."""
+
     uid: str = Field(..., description="UID of the event to delete", min_length=1)
     calendar_name: Optional[str] = Field(default=None, description="Calendar name")
 
 
 # -- CardDAV input models --
 
+
 class CardListAddressBooksInput(AccountIdMixin):
     """Input for listing CardDAV address books."""
+
     pass
 
 
 class CardListContactsInput(AccountIdMixin):
     """Input for listing contacts."""
-    addressbook_name: Optional[str] = Field(default=None, description="Address book name (default: first/primary)")
+
+    addressbook_name: Optional[str] = Field(
+        default=None, description="Address book name (default: first/primary)"
+    )
     limit: int = Field(default=50, description="Max contacts to return", ge=1, le=500)
 
 
 class CardSearchContactsInput(AccountIdMixin):
     """Input for searching contacts."""
-    query: str = Field(..., description="Search string (matches against name, email, phone)", min_length=1)
-    addressbook_name: Optional[str] = Field(default=None, description="Address book to search")
+
+    query: str = Field(
+        ...,
+        description="Search string (matches against name, email, phone)",
+        min_length=1,
+    )
+    addressbook_name: Optional[str] = Field(
+        default=None, description="Address book to search"
+    )
     limit: int = Field(default=50, description="Max results", ge=1, le=500)
 
 
 class CardGetContactInput(AccountIdMixin):
     """Input for reading a single contact."""
+
     uid: str = Field(..., description="Contact UID", min_length=1)
-    addressbook_name: Optional[str] = Field(default=None, description="Address book name")
+    addressbook_name: Optional[str] = Field(
+        default=None, description="Address book name"
+    )
 
 
 class CardCreateContactInput(AccountIdMixin):
     """Input for creating a contact."""
+
     fn: str = Field(..., description="Full name", min_length=1)
-    email: Optional[str] = Field(default=None, description="Email address(es), comma-separated")
-    tel: Optional[str] = Field(default=None, description="Phone number(s), comma-separated")
+    email: Optional[str] = Field(
+        default=None, description="Email address(es), comma-separated"
+    )
+    tel: Optional[str] = Field(
+        default=None, description="Phone number(s), comma-separated"
+    )
     org: Optional[str] = Field(default=None, description="Organization")
     title: Optional[str] = Field(default=None, description="Job title")
-    addressbook_name: Optional[str] = Field(default=None, description="Address book name")
+    addressbook_name: Optional[str] = Field(
+        default=None, description="Address book name"
+    )
 
 
 class CardUpdateContactInput(AccountIdMixin):
     """Input for updating a contact."""
+
     uid: str = Field(..., description="UID of the contact to update", min_length=1)
-    addressbook_name: Optional[str] = Field(default=None, description="Address book name")
+    addressbook_name: Optional[str] = Field(
+        default=None, description="Address book name"
+    )
     fn: Optional[str] = Field(default=None, description="New full name")
     email: Optional[str] = Field(default=None, description="New email(s)")
     tel: Optional[str] = Field(default=None, description="New phone(s)")
@@ -903,8 +1054,11 @@ class CardUpdateContactInput(AccountIdMixin):
 
 class CardDeleteContactInput(AccountIdMixin):
     """Input for deleting a contact."""
+
     uid: str = Field(..., description="UID of the contact to delete", min_length=1)
-    addressbook_name: Optional[str] = Field(default=None, description="Address book name")
+    addressbook_name: Optional[str] = Field(
+        default=None, description="Address book name"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -941,7 +1095,9 @@ async def _try_mozilla_autoconfig(domain: str) -> Optional[Dict[str, Any]]:
         f"https://{domain}/.well-known/autoconfig/mail/config-v1.1.xml",
     ]
 
-    async with safe_async_client(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True) as client:
+    async with safe_async_client(
+        timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True
+    ) as client:
         for url in urls:
             try:
                 resp = await client.get(url)
@@ -1020,7 +1176,9 @@ def _parse_mozilla_autoconfig(xml_text: str) -> Optional[Dict[str, Any]]:
     return result
 
 
-async def _try_microsoft_autodiscover(domain: str, email_addr: str) -> Optional[Dict[str, Any]]:
+async def _try_microsoft_autodiscover(
+    domain: str, email_addr: str
+) -> Optional[Dict[str, Any]]:
     """Try Microsoft / Mailcow Autodiscover (POX protocol).
 
     Posts an Autodiscover XML request to:
@@ -1042,7 +1200,9 @@ async def _try_microsoft_autodiscover(domain: str, email_addr: str) -> Optional[
 
     headers = {"Content-Type": "text/xml; charset=utf-8"}
 
-    async with safe_async_client(timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True) as client:
+    async with safe_async_client(
+        timeout=_AUTODISCOVER_TIMEOUT, follow_redirects=True
+    ) as client:
         for url in urls:
             try:
                 resp = await client.post(url, content=body, headers=headers)
@@ -1126,8 +1286,20 @@ async def _try_dns_srv(domain: str) -> Optional[Dict[str, Any]]:
         # (record, key_host, key_port, key_security, security_value)
         (f"_imaps._tcp.{domain}", "imap_host", "imap_port", "imap_security", "ssl"),
         (f"_imap._tcp.{domain}", "imap_host", "imap_port", "imap_security", "starttls"),
-        (f"_submissions._tcp.{domain}", "smtp_host", "smtp_port", "smtp_security", "ssl"),
-        (f"_submission._tcp.{domain}", "smtp_host", "smtp_port", "smtp_security", "starttls"),
+        (
+            f"_submissions._tcp.{domain}",
+            "smtp_host",
+            "smtp_port",
+            "smtp_security",
+            "ssl",
+        ),
+        (
+            f"_submission._tcp.{domain}",
+            "smtp_host",
+            "smtp_port",
+            "smtp_security",
+            "starttls",
+        ),
     ]
 
     loop = asyncio.get_event_loop()
@@ -1135,16 +1307,24 @@ async def _try_dns_srv(domain: str) -> Optional[Dict[str, Any]]:
         if hkey in result:
             continue  # prefer earlier (more secure) variant
         try:
-            answers = await loop.run_in_executor(
-                None, lambda name=srv_name: socket.getaddrinfo(name, None, type=socket.SOCK_STREAM)
+            # Probe resolution only; getaddrinfo won't give us SRV data, so we
+            # fall back to the socket resolver below. The call still raises on
+            # an unresolvable name, which the except handles.
+            await loop.run_in_executor(
+                None,
+                lambda name=srv_name: socket.getaddrinfo(
+                    name, None, type=socket.SOCK_STREAM
+                ),
             )
-            # getaddrinfo won't give us SRV data, fall back to socket resolver
         except Exception:
             pass
         # Use the resolver module approach via subprocess for SRV
         try:
             proc = await asyncio.create_subprocess_exec(
-                "dig", "+short", "SRV", srv_name,
+                "dig",
+                "+short",
+                "SRV",
+                srv_name,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -1237,7 +1417,9 @@ async def _autodiscover(email_addr: str) -> Dict[str, Any]:
                 merged[k] = v
 
     if not merged:
-        return {"error": f"No autodiscovery results for {domain}. You may need to configure this account manually."}
+        return {
+            "error": f"No autodiscovery results for {domain}. You may need to configure this account manually."
+        }
 
     merged["sources"] = sources
 
@@ -1245,8 +1427,7 @@ async def _autodiscover(email_addr: str) -> Dict[str, Any]:
     template = merged.pop("username_template", None)
     if template:
         username = (
-            template
-            .replace("%EMAILADDRESS%", email_addr)
+            template.replace("%EMAILADDRESS%", email_addr)
             .replace("%EMAILLOCALPART%", local_part)
             .replace("%EMAILDOMAIN%", domain)
         )
@@ -1258,6 +1439,7 @@ async def _autodiscover(email_addr: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Tools — Account management
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool(
     name="email_autodiscover",
@@ -1333,8 +1515,10 @@ async def email_autodiscover(params: AutodiscoverInput) -> str:
         lines.append(f"**Suggested username**: `{params.email_address}` (default)")
 
     lines.append("")
-    lines.append("Use these settings with `email_add_account` to complete setup. "
-                  "You will still need to provide a password or app password.")
+    lines.append(
+        "Use these settings with `email_add_account` to complete setup. "
+        "You will still need to provide a password or app password."
+    )
 
     return "\n".join(lines)
 
@@ -1364,8 +1548,12 @@ async def email_list_accounts() -> str:
         name = a.get("display_name") or a["id"]
         lines.append(f"## {name} (`{a['id']}`)")
         lines.append(f"- **Email**: {a['email_address']}")
-        lines.append(f"- **IMAP**: {a['imap_host']}:{a.get('imap_port', 993)} ({a.get('imap_security', 'ssl')})")
-        lines.append(f"- **SMTP**: {a['smtp_host']}:{a.get('smtp_port', 587)} ({a.get('smtp_security', 'starttls')})")
+        lines.append(
+            f"- **IMAP**: {a['imap_host']}:{a.get('imap_port', 993)} ({a.get('imap_security', 'ssl')})"
+        )
+        lines.append(
+            f"- **SMTP**: {a['smtp_host']}:{a.get('smtp_port', 587)} ({a.get('smtp_security', 'starttls')})"
+        )
         lines.append("")
     return "\n".join(lines)
 
@@ -1433,6 +1621,7 @@ async def email_remove_account(params: RemoveAccountInput) -> str:
 # Tools — Folder operations
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool(
     name="email_list_folders",
     annotations={
@@ -1452,6 +1641,7 @@ async def email_list_folders(params: ListFoldersInput) -> str:
     Returns:
         Markdown list of folder names.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -1466,7 +1656,9 @@ async def email_list_folders(params: ListFoldersInput) -> str:
                     if name:
                         folders.append(name)
                 folders.sort()
-                lines = [f"# Folders for {acct.get('display_name') or params.account_id}\n"]
+                lines = [
+                    f"# Folders for {acct.get('display_name') or params.account_id}\n"
+                ]
                 for f in folders:
                     lines.append(f"- {f}")
                 return "\n".join(lines)
@@ -1477,6 +1669,7 @@ async def email_list_folders(params: ListFoldersInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -1499,6 +1692,7 @@ async def email_create_folder(params: CreateFolderInput) -> str:
     Returns:
         Confirmation or error message.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -1515,6 +1709,7 @@ async def email_create_folder(params: CreateFolderInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -1537,6 +1732,7 @@ async def email_delete_folder(params: DeleteFolderInput) -> str:
     Returns:
         Confirmation or error message.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -1553,12 +1749,14 @@ async def email_delete_folder(params: DeleteFolderInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
 # ---------------------------------------------------------------------------
 # Tools — Reading mail
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool(
     name="email_list_messages",
@@ -1582,6 +1780,7 @@ async def email_list_messages(params: ListEmailsInput) -> str:
     Returns:
         Markdown table of messages or an empty-folder notice.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -1602,10 +1801,18 @@ async def email_list_messages(params: ListEmailsInput) -> str:
                 results = []
                 for uid_bytes in page:
                     uid = uid_bytes.decode()
-                    status2, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+                    status2, msg_data = conn.uid(
+                        "FETCH",
+                        uid,
+                        "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])",
+                    )
                     if status2 != "OK" or not msg_data or not msg_data[0]:
                         continue
-                    raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
+                    raw = (
+                        msg_data[0][1]
+                        if isinstance(msg_data[0], tuple)
+                        else msg_data[0]
+                    )
                     msg = email.message_from_bytes(raw)
                     results.append(_summarise_msg(msg, uid))
 
@@ -1618,10 +1825,14 @@ async def email_list_messages(params: ListEmailsInput) -> str:
                     "|-----|------|---------|------|",
                 ]
                 for r in results:
-                    lines.append(f"| {r['uid']} | {r['from'][:40]} | {r['subject'][:50]} | {r['date'][:25]} |")
+                    lines.append(
+                        f"| {r['uid']} | {r['from'][:40]} | {r['subject'][:50]} | {r['date'][:25]} |"
+                    )
 
                 if params.offset + params.limit < total:
-                    lines.append(f"\n*More messages available — use offset={params.offset + params.limit}*")
+                    lines.append(
+                        f"\n*More messages available — use offset={params.offset + params.limit}*"
+                    )
 
                 return "\n".join(lines)
             finally:
@@ -1631,6 +1842,7 @@ async def email_list_messages(params: ListEmailsInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -1661,6 +1873,7 @@ async def email_search_messages(params: SearchEmailsInput) -> str:
     Returns:
         Markdown table of matching messages.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -1678,10 +1891,18 @@ async def email_search_messages(params: SearchEmailsInput) -> str:
                 results = []
                 for uid_bytes in uids:
                     uid = uid_bytes.decode()
-                    status2, msg_data = conn.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])")
+                    status2, msg_data = conn.uid(
+                        "FETCH",
+                        uid,
+                        "(BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])",
+                    )
                     if status2 != "OK" or not msg_data or not msg_data[0]:
                         continue
-                    raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
+                    raw = (
+                        msg_data[0][1]
+                        if isinstance(msg_data[0], tuple)
+                        else msg_data[0]
+                    )
                     msg = email.message_from_bytes(raw)
                     results.append(_summarise_msg(msg, uid))
 
@@ -1692,7 +1913,9 @@ async def email_search_messages(params: SearchEmailsInput) -> str:
                     "|-----|------|---------|------|",
                 ]
                 for r in results:
-                    lines.append(f"| {r['uid']} | {r['from'][:40]} | {r['subject'][:50]} | {r['date'][:25]} |")
+                    lines.append(
+                        f"| {r['uid']} | {r['from'][:40]} | {r['subject'][:50]} | {r['date'][:25]} |"
+                    )
                 return "\n".join(lines)
             finally:
                 try:
@@ -1701,6 +1924,7 @@ async def email_search_messages(params: SearchEmailsInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -1723,6 +1947,7 @@ async def email_read_message(params: ReadEmailInput) -> str:
     Returns:
         Full message headers and plain-text body.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -1760,12 +1985,14 @@ async def email_read_message(params: ReadEmailInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
 # ---------------------------------------------------------------------------
 # Tools — Sending mail
 # ---------------------------------------------------------------------------
+
 
 def _build_message(
     acct: Dict[str, Any],
@@ -1794,7 +2021,11 @@ def _build_message(
     return msg
 
 
-def _send_message(acct: Dict[str, Any], msg: email.mime.multipart.MIMEMultipart, bcc: Optional[str] = None) -> None:
+def _send_message(
+    acct: Dict[str, Any],
+    msg: email.mime.multipart.MIMEMultipart,
+    bcc: Optional[str] = None,
+) -> None:
     """Send *msg* via SMTP and save to Sent folder via IMAP."""
     recipients = []
     for hdr in ("To", "Cc"):
@@ -1820,7 +2051,9 @@ def _send_message(acct: Dict[str, Any], msg: email.mime.multipart.MIMEMultipart,
                     imap.append(
                         folder,
                         "\\Seen",
-                        imaplib.Time2Internaldate(datetime.now(timezone.utc).timestamp()),
+                        imaplib.Time2Internaldate(
+                            datetime.now(timezone.utc).timestamp()
+                        ),
                         msg.as_bytes(),
                     )
                     break
@@ -1852,14 +2085,18 @@ async def email_send_message(params: SendEmailInput) -> str:
     Returns:
         Confirmation with recipient and subject.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
-            msg = _build_message(acct, params.to, params.subject, params.body, params.cc, params.bcc)
+            msg = _build_message(
+                acct, params.to, params.subject, params.body, params.cc, params.bcc
+            )
             _send_message(acct, msg, params.bcc)
-            return f"Email sent from {acct['email_address']} to {params.to}: \"{params.subject}\""
+            return f'Email sent from {acct["email_address"]} to {params.to}: "{params.subject}"'
         except Exception as e:
             return f"Error sending email: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -1885,6 +2122,7 @@ async def email_reply(params: ReplyEmailInput) -> str:
     Returns:
         Confirmation message.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -1908,9 +2146,15 @@ async def email_reply(params: ReplyEmailInput) -> str:
             if params.reply_all:
                 orig_to = _decode_header(original.get("To") or "")
                 orig_cc = _decode_header(original.get("Cc") or "")
-                all_addrs = [a.strip() for a in (orig_to + "," + orig_cc).split(",") if a.strip()]
+                all_addrs = [
+                    a.strip() for a in (orig_to + "," + orig_cc).split(",") if a.strip()
+                ]
                 # Remove self
-                all_addrs = [a for a in all_addrs if acct["email_address"].lower() not in a.lower()]
+                all_addrs = [
+                    a
+                    for a in all_addrs
+                    if acct["email_address"].lower() not in a.lower()
+                ]
                 cc = ", ".join(all_addrs) if all_addrs else None
 
             subject = _decode_header(original.get("Subject") or "")
@@ -1922,11 +2166,20 @@ async def email_reply(params: ReplyEmailInput) -> str:
             if message_id:
                 references = f"{references} {message_id}".strip()
 
-            msg = _build_message(acct, to, subject, params.body, cc=cc, in_reply_to=message_id, references=references)
+            msg = _build_message(
+                acct,
+                to,
+                subject,
+                params.body,
+                cc=cc,
+                in_reply_to=message_id,
+                references=references,
+            )
             _send_message(acct, msg)
             return f"Reply sent to {to}" + (f" (CC: {cc})" if cc else "")
         except Exception as e:
             return f"Error replying: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -1952,6 +2205,7 @@ async def email_forward(params: ForwardEmailInput) -> str:
     Returns:
         Confirmation message.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -1986,9 +2240,10 @@ async def email_forward(params: ForwardEmailInput) -> str:
 
             msg = _build_message(acct, params.to, subject, fwd_body)
             _send_message(acct, msg)
-            return f"Forwarded to {params.to}: \"{subject}\""
+            return f'Forwarded to {params.to}: "{subject}"'
         except Exception as e:
             return f"Error forwarding: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2013,6 +2268,7 @@ async def email_move_message(params: MoveEmailInput) -> str:
     Returns:
         Confirmation message.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -2029,7 +2285,11 @@ async def email_move_message(params: MoveEmailInput) -> str:
                 # UID, not every \Deleted message in the folder. If the
                 # server doesn't advertise UIDPLUS, refuse rather than risk
                 # destroying the user's other \Deleted messages.
-                caps = " ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else ""
+                caps = (
+                    " ".join(conn.capabilities).upper()
+                    if hasattr(conn, "capabilities")
+                    else ""
+                )
                 if "UIDPLUS" in caps:
                     conn.uid("EXPUNGE", params.uid)
                 else:
@@ -2052,6 +2312,7 @@ async def email_move_message(params: MoveEmailInput) -> str:
                     pass
         except Exception as e:
             return f"Error moving message: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2090,13 +2351,18 @@ async def email_delete_message(params: DeleteEmailInput) -> str:
         Confirmation string naming UID + destination, or an ``Error: …``
         message on failure.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
             conn = _imap_connect(acct)
             try:
                 conn.select(params.folder)
-                caps = " ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else ""
+                caps = (
+                    " ".join(conn.capabilities).upper()
+                    if hasattr(conn, "capabilities")
+                    else ""
+                )
                 uidplus = "UIDPLUS" in caps
                 if params.permanent:
                     # STORE \Deleted, then UID EXPUNGE (gated by UIDPLUS).
@@ -2123,9 +2389,14 @@ async def email_delete_message(params: DeleteEmailInput) -> str:
                     )
                 trash = _resolve_trash_folder(conn, acct, params.trash_folder)
                 status, data = conn.uid("COPY", params.uid, trash)
-                if status == "NO" and data and any(
-                    isinstance(d, (bytes, bytearray)) and b"TRYCREATE" in bytes(d).upper()
-                    for d in data
+                if (
+                    status == "NO"
+                    and data
+                    and any(
+                        isinstance(d, (bytes, bytearray))
+                        and b"TRYCREATE" in bytes(d).upper()
+                        for d in data
+                    )
                 ):
                     conn.create(trash)
                     status, data = conn.uid("COPY", params.uid, trash)
@@ -2141,6 +2412,7 @@ async def email_delete_message(params: DeleteEmailInput) -> str:
                     pass
         except Exception as e:
             return f"Error deleting message: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2172,13 +2444,18 @@ async def email_expunge(params: ExpungeInput) -> str:
     Returns:
         Confirmation message, or an ``Error: …`` string on refusal/failure.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
             conn = _imap_connect(acct)
             try:
                 conn.select(params.folder)
-                caps = " ".join(conn.capabilities).upper() if hasattr(conn, "capabilities") else ""
+                caps = (
+                    " ".join(conn.capabilities).upper()
+                    if hasattr(conn, "capabilities")
+                    else ""
+                )
                 if params.uid:
                     if "UIDPLUS" not in caps:
                         return (
@@ -2205,6 +2482,7 @@ async def email_expunge(params: ExpungeInput) -> str:
                     pass
         except Exception as e:
             return f"Error expunging: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2238,6 +2516,7 @@ async def email_modify_flags(params: ModifyFlagsInput) -> str:
         Confirmation message naming the UID, folder, and applied flag
         deltas, or an ``Error: …`` string on failure.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -2269,12 +2548,14 @@ async def email_modify_flags(params: ModifyFlagsInput) -> str:
                     pass
         except Exception as e:
             return f"Error updating flags: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
 # ---------------------------------------------------------------------------
 # Tools — Sieve / ManageSieve
 # ---------------------------------------------------------------------------
+
 
 @mcp.tool(
     name="email_sieve_list",
@@ -2298,6 +2579,7 @@ async def email_sieve_list(params: SieveListInput) -> str:
     Returns:
         Markdown list of scripts with active indicator.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -2309,7 +2591,9 @@ async def email_sieve_list(params: SieveListInput) -> str:
                 if not scripts:
                     return f"No Sieve scripts on {params.account_id}."
 
-                lines = [f"# Sieve Scripts — {acct.get('display_name') or params.account_id}\n"]
+                lines = [
+                    f"# Sieve Scripts — {acct.get('display_name') or params.account_id}\n"
+                ]
                 for name, active in scripts:
                     marker = " **(active)**" if active else ""
                     lines.append(f"- `{name}`{marker}")
@@ -2321,6 +2605,7 @@ async def email_sieve_list(params: SieveListInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2343,6 +2628,7 @@ async def email_sieve_get(params: SieveGetInput) -> str:
     Returns:
         The full Sieve script content.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -2366,6 +2652,7 @@ async def email_sieve_get(params: SieveGetInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2392,6 +2679,7 @@ async def email_sieve_put(params: SievePutInput) -> str:
     Returns:
         Confirmation or server-side validation error.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -2418,6 +2706,7 @@ async def email_sieve_put(params: SievePutInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2443,6 +2732,7 @@ async def email_sieve_activate(params: SieveActivateInput) -> str:
     Returns:
         Confirmation message.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -2462,6 +2752,7 @@ async def email_sieve_activate(params: SieveActivateInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2487,6 +2778,7 @@ async def email_sieve_delete(params: SieveDeleteInput) -> str:
     Returns:
         Confirmation or error message.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -2498,7 +2790,9 @@ async def email_sieve_delete(params: SieveDeleteInput) -> str:
                         f"Error deleting script '{params.script_name}': {result}. "
                         "If it's the active script, deactivate it first with email_sieve_activate."
                     )
-                return f"Script '{params.script_name}' deleted from {params.account_id}."
+                return (
+                    f"Script '{params.script_name}' deleted from {params.account_id}."
+                )
             finally:
                 try:
                     conn.logout()
@@ -2506,6 +2800,7 @@ async def email_sieve_delete(params: SieveDeleteInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
@@ -2531,6 +2826,7 @@ async def email_sieve_rename(params: SieveRenameInput) -> str:
     Returns:
         Confirmation or error message.
     """
+
     def _impl():
         try:
             acct = _get_account(params.account_id)
@@ -2581,12 +2877,14 @@ async def email_sieve_rename(params: SieveRenameInput) -> str:
                     pass
         except Exception as e:
             return f"Error: {e}"
+
     return await asyncio.to_thread(_impl)
 
 
 # ---------------------------------------------------------------------------
 # Tools — CalDAV (Calendars)
 # ---------------------------------------------------------------------------
+
 
 def _get_calendar(acct: Dict[str, Any], name: Optional[str]) -> caldav.Calendar:
     """Return a calendar by name, or the first available calendar."""
@@ -2674,6 +2972,7 @@ async def cal_list_events(params: CalListEventsInput) -> str:
             end = datetime.fromisoformat(params.end)
         else:
             from datetime import timedelta
+
             end = start + timedelta(days=30)
 
         events = cal.date_search(start=start, end=end, expand=True)
@@ -2763,6 +3062,7 @@ async def cal_create_event(params: CalCreateEventInput) -> str:
         cal = _get_calendar(acct, params.calendar_name)
 
         import uuid
+
         uid = str(uuid.uuid4())
         dtstart = datetime.fromisoformat(params.dtstart)
         dtend = datetime.fromisoformat(params.dtend)
@@ -2873,6 +3173,7 @@ async def cal_delete_event(params: CalDeleteEventInput) -> str:
 # Tools — CardDAV (Contacts)
 # ---------------------------------------------------------------------------
 
+
 async def _carddav_propfind(acct: Dict[str, Any]) -> List[Dict[str, str]]:
     """List address books via PROPFIND on the CardDAV URL."""
     url, headers, auth = _carddav_headers(acct)
@@ -2885,7 +3186,9 @@ async def _carddav_propfind(acct: Dict[str, Any]) -> List[Dict[str, str]]:
 </d:propfind>"""
     ssl_verify = not acct.get("dav_allow_insecure", False)
     async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth) as client:
-        resp = await client.request("PROPFIND", url, content=body, headers={**headers, "Depth": "1"})
+        resp = await client.request(
+            "PROPFIND", url, content=body, headers={**headers, "Depth": "1"}
+        )
         resp.raise_for_status()
     books = []
     try:
@@ -2903,7 +3206,9 @@ async def _carddav_propfind(acct: Dict[str, Any]) -> List[Dict[str, str]]:
     return books
 
 
-async def _carddav_list_vcards(acct: Dict[str, Any], book_href: str) -> List[Tuple[str, str]]:
+async def _carddav_list_vcards(
+    acct: Dict[str, Any], book_href: str
+) -> List[Tuple[str, str]]:
     """List all vCards in an address book. Returns [(href, vcard_data), ...]."""
     base_url = acct.get("carddav_url", "")
     full_url = resolve_dav_url(base_url, book_href)
@@ -2919,7 +3224,9 @@ async def _carddav_list_vcards(acct: Dict[str, Any], book_href: str) -> List[Tup
     _, headers, auth = _carddav_headers(acct)
     ssl_verify = not acct.get("dav_allow_insecure", False)
     async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth) as client:
-        resp = await client.request("REPORT", full_url, content=body, headers={**headers, "Depth": "1"})
+        resp = await client.request(
+            "REPORT", full_url, content=body, headers={**headers, "Depth": "1"}
+        )
         resp.raise_for_status()
 
     vcards = []
@@ -3010,7 +3317,7 @@ async def card_list_contacts(params: CardListContactsInput) -> str:
         if not vcards:
             return "No contacts found."
 
-        contacts = [_format_contact(data) for _, data in vcards[:params.limit]]
+        contacts = [_format_contact(data) for _, data in vcards[: params.limit]]
         contacts.sort(key=lambda c: c.get("fn", "").lower())
 
         lines = [
@@ -3152,6 +3459,7 @@ async def card_create_contact(params: CardCreateContactInput) -> str:
         book_href = await _get_addressbook_href(acct, params.addressbook_name)
 
         import uuid
+
         uid = str(uuid.uuid4())
 
         vc = vobject.vCard()
@@ -3186,7 +3494,9 @@ async def card_create_contact(params: CardCreateContactInput) -> str:
         # resolve_dav_url() pins the URL host to the configured carddav_url, so
         # a compromised DAV server cannot redirect this auth'd PUT to an attacker.
         # Covered by tests/test_dav_url_pinning.py.
-        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(
+            timeout=30, verify=ssl_verify, auth=auth_obj
+        ) as client:
             resp = await client.put(  # nosemgrep: python.mcp.mcp-auth-passthrough-taint.mcp-auth-passthrough-taint
                 put_url,
                 content=vcard_data,
@@ -3276,7 +3586,9 @@ async def card_update_contact(params: CardUpdateContactInput) -> str:
         # resolve_dav_url() pins the URL host to the configured carddav_url, so
         # a compromised DAV server cannot redirect this auth'd PUT to an attacker.
         # Covered by tests/test_dav_url_pinning.py.
-        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(
+            timeout=30, verify=ssl_verify, auth=auth_obj
+        ) as client:
             resp = await client.put(  # nosemgrep: python.mcp.mcp-auth-passthrough-taint.mcp-auth-passthrough-taint
                 put_url,
                 content=vc.serialize(),
@@ -3332,7 +3644,9 @@ async def card_delete_contact(params: CardDeleteContactInput) -> str:
 
         _, _, auth_obj = _carddav_headers(acct)
         ssl_verify = not acct.get("dav_allow_insecure", False)
-        async with safe_async_client(timeout=30, verify=ssl_verify, auth=auth_obj) as client:
+        async with safe_async_client(
+            timeout=30, verify=ssl_verify, auth=auth_obj
+        ) as client:
             resp = await client.delete(del_url, headers={})
             if resp.status_code not in (200, 204):
                 return f"Error: Server returned {resp.status_code}: {resp.text[:200]}"

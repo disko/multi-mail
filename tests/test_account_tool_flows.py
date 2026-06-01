@@ -13,12 +13,12 @@ Sibling files:
 - ``test_imap_write_flows.py`` — exercises ``email_add_account`` (the
   remove tool's sibling write path).
 """
+
 from __future__ import annotations
 
 import asyncio
 import importlib.util
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -66,6 +66,7 @@ def _acct(**overrides):
 # email_list_accounts
 # ---------------------------------------------------------------------------
 
+
 def test_list_accounts_empty_returns_hint(config):
     """No config file → short-circuit hint message; rendering loop is not reached."""
     assert not config.exists()
@@ -77,10 +78,12 @@ def test_list_accounts_empty_returns_hint(config):
 def test_list_accounts_renders_each_entry_with_display_name(config):
     """Populated config renders each account with header tally, host:port,
     and the ``display_name or id`` fallback for each row."""
-    email_mcp._save_accounts([
-        _acct(id="acct1", display_name="Work"),
-        _acct(id="acct2", display_name=None, email_address="me@example.org"),
-    ])
+    email_mcp._save_accounts(
+        [
+            _acct(id="acct1", display_name="Work"),
+            _acct(id="acct2", display_name=None, email_address="me@example.org"),
+        ]
+    )
     out = run(email_mcp.email_list_accounts())
     assert "# Configured Email Accounts (2)" in out
     # display_name branch:
@@ -98,15 +101,21 @@ def test_list_accounts_uses_id_when_display_name_is_null(config):
     as ``None``. ``acct.get("display_name") or a["id"]`` is correct;
     ``acct.get("display_name", a["id"])`` would be the bug."""
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(json.dumps({"accounts": [
-        {
-            "id": "x",
-            "display_name": None,
-            "email_address": "x@example.com",
-            "imap_host": "imap.example.com",
-            "smtp_host": "smtp.example.com",
-        },
-    ]}))
+    config.write_text(
+        json.dumps(
+            {
+                "accounts": [
+                    {
+                        "id": "x",
+                        "display_name": None,
+                        "email_address": "x@example.com",
+                        "imap_host": "imap.example.com",
+                        "smtp_host": "smtp.example.com",
+                    },
+                ]
+            }
+        )
+    )
     out = run(email_mcp.email_list_accounts())
     assert "## x (`x`)" in out
     assert "None" not in out
@@ -116,16 +125,21 @@ def test_list_accounts_uses_id_when_display_name_is_null(config):
 # email_remove_account
 # ---------------------------------------------------------------------------
 
+
 def test_remove_account_removes_existing_and_persists(config):
     """Happy path: load → filter → save → confirmation. Disk reflects the
     removal — only the surviving account remains."""
-    email_mcp._save_accounts([
-        _acct(id="work", display_name="Work"),
-        _acct(id="personal", display_name="Personal", email_address="me@example.org"),
-    ])
-    out = run(email_mcp.email_remove_account(
-        email_mcp.RemoveAccountInput(account_id="work")
-    ))
+    email_mcp._save_accounts(
+        [
+            _acct(id="work", display_name="Work"),
+            _acct(
+                id="personal", display_name="Personal", email_address="me@example.org"
+            ),
+        ]
+    )
+    out = run(
+        email_mcp.email_remove_account(email_mcp.RemoveAccountInput(account_id="work"))
+    )
     assert "Account 'work' removed." in out
     remaining = json.loads(config.read_text())["accounts"]
     assert len(remaining) == 1
@@ -139,9 +153,9 @@ def test_remove_account_not_found_returns_error_and_leaves_disk_unchanged(config
     pre_content = config.read_text()
     pre_mtime_ns = config.stat().st_mtime_ns
 
-    out = run(email_mcp.email_remove_account(
-        email_mcp.RemoveAccountInput(account_id="ghost")
-    ))
+    out = run(
+        email_mcp.email_remove_account(email_mcp.RemoveAccountInput(account_id="ghost"))
+    )
     assert "Error: Account 'ghost' not found." in out
     # Disk content unchanged.
     assert config.read_text() == pre_content
@@ -153,9 +167,11 @@ def test_remove_account_with_empty_config_returns_not_found(config):
     """No config file at all → ``_load_accounts`` returns ``[]`` → the
     not-found branch fires without _save_accounts ever creating the file."""
     assert not config.exists()
-    out = run(email_mcp.email_remove_account(
-        email_mcp.RemoveAccountInput(account_id="anything")
-    ))
+    out = run(
+        email_mcp.email_remove_account(
+            email_mcp.RemoveAccountInput(account_id="anything")
+        )
+    )
     assert "Error: Account 'anything' not found." in out
     # No file was created — _save_accounts was not called.
     assert not config.exists()

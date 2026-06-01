@@ -11,13 +11,12 @@ substitutes for ``safe_async_client`` and serves canned responses keyed by URL.
 ``asyncio.create_subprocess_exec`` with a fake process. (That asyncio API is
 Python's execFile-equivalent — no shell, no injection risk.)
 """
+
 from __future__ import annotations
 
 import asyncio
 import importlib.util
 from pathlib import Path
-
-import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -81,6 +80,7 @@ class _FakeAsyncClient:
 def _install_client(monkeypatch, client):
     def factory(**kwargs):
         return client
+
     monkeypatch.setattr(email_mcp, "safe_async_client", factory)
 
 
@@ -109,10 +109,13 @@ MOZILLA_XML = """<?xml version="1.0"?>
 
 def test_mozilla_autoconfig_primary_url(monkeypatch):
     """Primary URL (autoconfig.{domain}/mail/config-v1.1.xml) hits 200 first."""
-    client = _FakeAsyncClient(get={
-        "https://autoconfig.example.com/mail/config-v1.1.xml":
-            _FakeResp(status_code=200, text=MOZILLA_XML),
-    })
+    client = _FakeAsyncClient(
+        get={
+            "https://autoconfig.example.com/mail/config-v1.1.xml": _FakeResp(
+                status_code=200, text=MOZILLA_XML
+            ),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_mozilla_autoconfig("example.com"))
     assert out is not None
@@ -123,10 +126,13 @@ def test_mozilla_autoconfig_primary_url(monkeypatch):
 
 
 def test_mozilla_autoconfig_falls_back_to_well_known(monkeypatch):
-    client = _FakeAsyncClient(get={
-        "https://example.com/.well-known/autoconfig/mail/config-v1.1.xml":
-            _FakeResp(status_code=200, text=MOZILLA_XML),
-    })
+    client = _FakeAsyncClient(
+        get={
+            "https://example.com/.well-known/autoconfig/mail/config-v1.1.xml": _FakeResp(
+                status_code=200, text=MOZILLA_XML
+            ),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_mozilla_autoconfig("example.com"))
     assert out is not None
@@ -143,8 +149,9 @@ def test_mozilla_autoconfig_swallows_network_errors(monkeypatch):
     """A network exception on one URL should not crash; try the next."""
     client = _FakeAsyncClient(
         get={
-            "https://example.com/.well-known/autoconfig/mail/config-v1.1.xml":
-                _FakeResp(status_code=200, text=MOZILLA_XML),
+            "https://example.com/.well-known/autoconfig/mail/config-v1.1.xml": _FakeResp(
+                status_code=200, text=MOZILLA_XML
+            ),
         },
         raise_on={"https://autoconfig.example.com/mail/config-v1.1.xml"},
     )
@@ -177,10 +184,13 @@ MICROSOFT_XML = """<?xml version="1.0"?>
 
 
 def test_microsoft_autodiscover_primary_subdomain(monkeypatch):
-    client = _FakeAsyncClient(post={
-        "https://autodiscover.example.com/autodiscover/autodiscover.xml":
-            _FakeResp(status_code=200, text=MICROSOFT_XML),
-    })
+    client = _FakeAsyncClient(
+        post={
+            "https://autodiscover.example.com/autodiscover/autodiscover.xml": _FakeResp(
+                status_code=200, text=MICROSOFT_XML
+            ),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_microsoft_autodiscover("example.com", "alice@example.com"))
     assert out is not None
@@ -190,10 +200,13 @@ def test_microsoft_autodiscover_primary_subdomain(monkeypatch):
 
 
 def test_microsoft_autodiscover_falls_back_to_root_domain(monkeypatch):
-    client = _FakeAsyncClient(post={
-        "https://example.com/autodiscover/autodiscover.xml":
-            _FakeResp(status_code=200, text=MICROSOFT_XML),
-    })
+    client = _FakeAsyncClient(
+        post={
+            "https://example.com/autodiscover/autodiscover.xml": _FakeResp(
+                status_code=200, text=MICROSOFT_XML
+            ),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_microsoft_autodiscover("example.com", "alice@example.com"))
     assert out is not None
@@ -203,17 +216,26 @@ def test_microsoft_autodiscover_falls_back_to_root_domain(monkeypatch):
 
 def test_microsoft_autodiscover_returns_none_when_nothing_responds(monkeypatch):
     _install_client(monkeypatch, _FakeAsyncClient(post={}))
-    assert run(email_mcp._try_microsoft_autodiscover("nowhere.example", "x@nowhere.example")) is None
+    assert (
+        run(
+            email_mcp._try_microsoft_autodiscover(
+                "nowhere.example", "x@nowhere.example"
+            )
+        )
+        is None
+    )
 
 
 def test_wellknown_dav_207_response_captures_urls(monkeypatch):
     """A 207 (Multi-Status) response means a real DAV endpoint responded."""
     caldav_url = "https://example.com/.well-known/caldav"
     carddav_url = "https://example.com/.well-known/carddav"
-    client = _FakeAsyncClient(request={
-        ("PROPFIND", caldav_url): _FakeResp(status_code=207, url=caldav_url),
-        ("PROPFIND", carddav_url): _FakeResp(status_code=207, url=carddav_url),
-    })
+    client = _FakeAsyncClient(
+        request={
+            ("PROPFIND", caldav_url): _FakeResp(status_code=207, url=caldav_url),
+            ("PROPFIND", carddav_url): _FakeResp(status_code=207, url=carddav_url),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_wellknown_dav("example.com"))
     assert out is not None
@@ -230,9 +252,11 @@ def test_wellknown_dav_no_endpoint_returns_none(monkeypatch):
 def test_wellknown_dav_partial_discovery_caldav_only(monkeypatch):
     """If only caldav is available, the result has just caldav_url."""
     caldav_url = "https://example.com/.well-known/caldav"
-    client = _FakeAsyncClient(request={
-        ("PROPFIND", caldav_url): _FakeResp(status_code=207, url=caldav_url),
-    })
+    client = _FakeAsyncClient(
+        request={
+            ("PROPFIND", caldav_url): _FakeResp(status_code=207, url=caldav_url),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_wellknown_dav("example.com"))
     assert out is not None
@@ -266,12 +290,15 @@ def _install_dig(monkeypatch, srv_table):
 
 def test_dns_srv_prefers_imaps_over_imap(monkeypatch):
     """When both _imaps and _imap return SRV records, prefer _imaps (SSL)."""
-    _install_dig(monkeypatch, {
-        "_imaps._tcp.example.com": "0 1 993 imap.example.com.",
-        "_imap._tcp.example.com": "0 1 143 imap.example.com.",
-        "_submissions._tcp.example.com": "0 1 465 smtp.example.com.",
-        "_submission._tcp.example.com": "0 1 587 smtp.example.com.",
-    })
+    _install_dig(
+        monkeypatch,
+        {
+            "_imaps._tcp.example.com": "0 1 993 imap.example.com.",
+            "_imap._tcp.example.com": "0 1 143 imap.example.com.",
+            "_submissions._tcp.example.com": "0 1 465 smtp.example.com.",
+            "_submission._tcp.example.com": "0 1 587 smtp.example.com.",
+        },
+    )
     out = run(email_mcp._try_dns_srv("example.com"))
     assert out is not None
     assert out["imap_host"] == "imap.example.com"
@@ -282,10 +309,13 @@ def test_dns_srv_prefers_imaps_over_imap(monkeypatch):
 
 
 def test_dns_srv_falls_back_to_starttls_when_ssl_record_absent(monkeypatch):
-    _install_dig(monkeypatch, {
-        "_imap._tcp.example.com": "0 1 143 imap.example.com.",
-        "_submission._tcp.example.com": "0 1 587 smtp.example.com.",
-    })
+    _install_dig(
+        monkeypatch,
+        {
+            "_imap._tcp.example.com": "0 1 143 imap.example.com.",
+            "_submission._tcp.example.com": "0 1 587 smtp.example.com.",
+        },
+    )
     out = run(email_mcp._try_dns_srv("example.com"))
     assert out is not None
     assert out["imap_port"] == 143
@@ -301,10 +331,13 @@ def test_dns_srv_returns_none_when_no_records(monkeypatch):
 
 def test_dns_srv_skips_record_pointing_at_root_dot(monkeypatch):
     """A SRV record with target '.' means 'service not available' (RFC 2782)."""
-    _install_dig(monkeypatch, {
-        "_imaps._tcp.example.com": "0 0 0 .",
-        "_imap._tcp.example.com": "0 1 143 imap.example.com.",
-    })
+    _install_dig(
+        monkeypatch,
+        {
+            "_imaps._tcp.example.com": "0 0 0 .",
+            "_imap._tcp.example.com": "0 1 143 imap.example.com.",
+        },
+    )
     out = run(email_mcp._try_dns_srv("example.com"))
     assert out is not None
     assert out["imap_host"] == "imap.example.com"
@@ -326,9 +359,12 @@ def test_microsoft_autodiscover_post_exception_continues_to_next_url(monkeypatch
         raise_on={primary},
     )
     _install_client(monkeypatch, client)
-    out = run(email_mcp._try_microsoft_autodiscover(
-        "example.com", "alice@example.com",
-    ))
+    out = run(
+        email_mcp._try_microsoft_autodiscover(
+            "example.com",
+            "alice@example.com",
+        )
+    )
     assert out is not None
     assert out["imap_host"] == "imap.example.com"
     # Both URLs were attempted.
@@ -343,14 +379,19 @@ def test_microsoft_autodiscover_skips_unparseable_response(monkeypatch):
     """
     primary = "https://autodiscover.example.com/autodiscover/autodiscover.xml"
     fallback = "https://example.com/autodiscover/autodiscover.xml"
-    client = _FakeAsyncClient(post={
-        primary: _FakeResp(status_code=200, text="<<not xml"),
-        fallback: _FakeResp(status_code=200, text=MICROSOFT_XML),
-    })
+    client = _FakeAsyncClient(
+        post={
+            primary: _FakeResp(status_code=200, text="<<not xml"),
+            fallback: _FakeResp(status_code=200, text=MICROSOFT_XML),
+        }
+    )
     _install_client(monkeypatch, client)
-    out = run(email_mcp._try_microsoft_autodiscover(
-        "example.com", "alice@example.com",
-    ))
+    out = run(
+        email_mcp._try_microsoft_autodiscover(
+            "example.com",
+            "alice@example.com",
+        )
+    )
     assert out is not None
     assert out["imap_host"] == "imap.example.com"
     # Continued past the unparseable primary.
@@ -381,12 +422,15 @@ def test_wellknown_dav_propfind_redirect_uses_location_header(monkeypatch):
     Pins lines 1188-1191."""
     caldav_path = "https://example.com/.well-known/caldav"
     redirected = "https://dav.example.com/cal/"
-    client = _FakeAsyncClient(request={
-        ("PROPFIND", caldav_path): _FakeResp(
-            status_code=301, url=caldav_path,
-            headers={"location": redirected},
-        ),
-    })
+    client = _FakeAsyncClient(
+        request={
+            ("PROPFIND", caldav_path): _FakeResp(
+                status_code=301,
+                url=caldav_path,
+                headers={"location": redirected},
+            ),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_wellknown_dav("example.com"))
     assert out is not None
@@ -404,10 +448,13 @@ def test_dns_srv_skips_dig_output_with_fewer_than_four_fields(monkeypatch):
     """dig returns a line with only 3 fields → ``len(parts) >= 4`` is False,
     loop continues without populating. The fallback variant (port 143)
     still wins. Pins partial 1156->1134."""
-    _install_dig(monkeypatch, {
-        "_imaps._tcp.example.com": "0 1 993",  # missing target field
-        "_imap._tcp.example.com": "0 1 143 imap.example.com.",
-    })
+    _install_dig(
+        monkeypatch,
+        {
+            "_imaps._tcp.example.com": "0 1 993",  # missing target field
+            "_imap._tcp.example.com": "0 1 143 imap.example.com.",
+        },
+    )
     out = run(email_mcp._try_dns_srv("example.com"))
     assert out is not None
     assert out["imap_host"] == "imap.example.com"
@@ -419,8 +466,10 @@ def test_dns_srv_skips_dig_output_with_fewer_than_four_fields(monkeypatch):
 def test_dns_srv_swallows_subprocess_exception(monkeypatch):
     """``asyncio.create_subprocess_exec`` itself raises → except: continue.
     Pins lines 1163-1164."""
+
     async def _boom(*args, **kwargs):
         raise OSError("dig binary missing")
+
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
 
     import socket as _socket
@@ -487,12 +536,15 @@ def test_wellknown_dav_redirect_with_location_skips_get_fallback(monkeypatch):
     skipped for that URL."""
     caldav_url = "https://example.com/.well-known/caldav"
     redirected = "https://dav.example.com/cal/"
-    client = _FakeAsyncClient(request={
-        ("PROPFIND", caldav_url): _FakeResp(
-            status_code=302, url=caldav_url,
-            headers={"location": redirected},
-        ),
-    })
+    client = _FakeAsyncClient(
+        request={
+            ("PROPFIND", caldav_url): _FakeResp(
+                status_code=302,
+                url=caldav_url,
+                headers={"location": redirected},
+            ),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_wellknown_dav("example.com"))
     assert out is not None
@@ -508,12 +560,16 @@ def test_wellknown_dav_redirect_without_location_falls_to_get(monkeypatch):
     populate-result line through the except into the GET-fallback check).
     """
     caldav_url = "https://example.com/.well-known/caldav"
-    client = _FakeAsyncClient(request={
-        # 301 with no `location` header in the response.
-        ("PROPFIND", caldav_url): _FakeResp(
-            status_code=301, url=caldav_url, headers={},
-        ),
-    })
+    client = _FakeAsyncClient(
+        request={
+            # 301 with no `location` header in the response.
+            ("PROPFIND", caldav_url): _FakeResp(
+                status_code=301,
+                url=caldav_url,
+                headers={},
+            ),
+        }
+    )
     _install_client(monkeypatch, client)
     out = run(email_mcp._try_wellknown_dav("example.com"))
     # PROPFIND fell through (no location), GET fallback got 404 default.

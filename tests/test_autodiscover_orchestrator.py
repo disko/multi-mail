@@ -6,13 +6,12 @@ The four ``_try_*`` discovery sources are monkeypatched with async coroutines
 that return canned dicts (or ``None`` / raise) so we can drive every merge,
 priority, and template-expansion branch without going on-network.
 """
+
 from __future__ import annotations
 
 import asyncio
 import importlib.util
 from pathlib import Path
-
-import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +31,7 @@ def _stub_sources(monkeypatch, *, mozilla=None, microsoft=None, dns=None, dav=No
             if isinstance(value, Exception):
                 raise value
             return value
+
         return _fn
 
     monkeypatch.setattr(email_mcp, "_try_mozilla_autoconfig", _factory(mozilla))
@@ -48,8 +48,10 @@ def run(coro):
 # Result merging
 # ---------------------------------------------------------------------------
 
+
 def test_mozilla_result_wins_over_microsoft_when_both_present(monkeypatch):
-    _stub_sources(monkeypatch,
+    _stub_sources(
+        monkeypatch,
         mozilla={
             "source": "mozilla",
             "imap_host": "imap.mozilla.example",
@@ -74,7 +76,8 @@ def test_mozilla_result_wins_over_microsoft_when_both_present(monkeypatch):
 
 def test_later_source_fills_gaps_left_by_earlier(monkeypatch):
     """Mozilla provides IMAP only; .well-known fills in DAV URLs."""
-    _stub_sources(monkeypatch,
+    _stub_sources(
+        monkeypatch,
         mozilla={
             "source": "mozilla",
             "imap_host": "imap.example.com",
@@ -94,7 +97,8 @@ def test_later_source_fills_gaps_left_by_earlier(monkeypatch):
 
 
 def test_dns_provides_smtp_when_mozilla_did_not(monkeypatch):
-    _stub_sources(monkeypatch,
+    _stub_sources(
+        monkeypatch,
         mozilla={
             "source": "mozilla",
             "imap_host": "imap.example.com",
@@ -124,7 +128,8 @@ def test_all_sources_none_returns_error_blob(monkeypatch):
 def test_exception_from_one_source_is_swallowed(monkeypatch):
     """If one method raises (e.g. DNS server timeout), the orchestrator must
     still return results from the other methods rather than blowing up."""
-    _stub_sources(monkeypatch,
+    _stub_sources(
+        monkeypatch,
         mozilla={
             "source": "mozilla",
             "imap_host": "imap.example.com",
@@ -145,8 +150,10 @@ def test_exception_from_one_source_is_swallowed(monkeypatch):
 # username_template expansion
 # ---------------------------------------------------------------------------
 
+
 def test_username_template_emailaddress_placeholder(monkeypatch):
-    _stub_sources(monkeypatch,
+    _stub_sources(
+        monkeypatch,
         mozilla={
             "source": "mozilla",
             "imap_host": "imap.example.com",
@@ -161,7 +168,8 @@ def test_username_template_emailaddress_placeholder(monkeypatch):
 
 
 def test_username_template_localpart_placeholder(monkeypatch):
-    _stub_sources(monkeypatch,
+    _stub_sources(
+        monkeypatch,
         mozilla={
             "source": "mozilla",
             "imap_host": "imap.example.com",
@@ -175,7 +183,8 @@ def test_username_template_localpart_placeholder(monkeypatch):
 
 
 def test_username_template_domain_placeholder(monkeypatch):
-    _stub_sources(monkeypatch,
+    _stub_sources(
+        monkeypatch,
         mozilla={
             "source": "mozilla",
             "imap_host": "imap.example.com",
@@ -190,7 +199,8 @@ def test_username_template_domain_placeholder(monkeypatch):
 
 
 def test_username_template_omitted_when_not_provided(monkeypatch):
-    _stub_sources(monkeypatch,
+    _stub_sources(
+        monkeypatch,
         mozilla={
             "source": "mozilla",
             "imap_host": "imap.example.com",
@@ -206,43 +216,53 @@ def test_username_template_omitted_when_not_provided(monkeypatch):
 # email_autodiscover (the public MCP tool) — markdown formatter coverage
 # ---------------------------------------------------------------------------
 
+
 def _stub_autodiscover(monkeypatch, value):
     """Replace the orchestrator `_autodiscover` with an async function
     returning the given canned dict. The public `email_autodiscover` tool
     body wraps this seam in markdown — we drive only the formatter."""
+
     async def _fn(_email_addr):
         return value
+
     monkeypatch.setattr(email_mcp, "_autodiscover", _fn)
 
 
 def test_autodiscover_tool_error_returns_error_string(monkeypatch):
     err = "No autodiscovery results for unknown.example.com. Try email_add_account directly."
     _stub_autodiscover(monkeypatch, {"error": err})
-    out = run(email_mcp.email_autodiscover(
-        email_mcp.AutodiscoverInput(email_address="user@unknown.example.com")
-    ))
+    out = run(
+        email_mcp.email_autodiscover(
+            email_mcp.AutodiscoverInput(email_address="user@unknown.example.com")
+        )
+    )
     # Short-circuits before formatting — no markdown header, just the raw error.
     assert out == err
     assert "# Autodiscovery Results" not in out
 
 
 def test_autodiscover_tool_renders_full_imap_smtp_caldav_carddav_markdown(monkeypatch):
-    _stub_autodiscover(monkeypatch, {
-        "sources": ["mozilla", "well-known-dav"],
-        "provider_name": "Example Mail",
-        "imap_host": "imap.example.com",
-        "imap_port": 993,
-        "imap_security": "ssl",
-        "smtp_host": "smtp.example.com",
-        "smtp_port": 587,
-        "smtp_security": "starttls",
-        "caldav_url": "https://dav.example.com/caldav/",
-        "carddav_url": "https://dav.example.com/carddav/",
-        "suggested_username": "alice",
-    })
-    out = run(email_mcp.email_autodiscover(
-        email_mcp.AutodiscoverInput(email_address="alice@example.com")
-    ))
+    _stub_autodiscover(
+        monkeypatch,
+        {
+            "sources": ["mozilla", "well-known-dav"],
+            "provider_name": "Example Mail",
+            "imap_host": "imap.example.com",
+            "imap_port": 993,
+            "imap_security": "ssl",
+            "smtp_host": "smtp.example.com",
+            "smtp_port": 587,
+            "smtp_security": "starttls",
+            "caldav_url": "https://dav.example.com/caldav/",
+            "carddav_url": "https://dav.example.com/carddav/",
+            "suggested_username": "alice",
+        },
+    )
+    out = run(
+        email_mcp.email_autodiscover(
+            email_mcp.AutodiscoverInput(email_address="alice@example.com")
+        )
+    )
     assert "# Autodiscovery Results for alice@example.com" in out
     assert "Domain: `example.com`" in out
     assert "mozilla, well-known-dav" in out
@@ -265,15 +285,20 @@ def test_autodiscover_tool_renders_full_imap_smtp_caldav_carddav_markdown(monkey
 
 
 def test_autodiscover_tool_omits_provider_when_absent(monkeypatch):
-    _stub_autodiscover(monkeypatch, {
-        "sources": ["mozilla"],
-        "imap_host": "imap.example.com",
-        "imap_port": 993,
-        "imap_security": "ssl",
-    })
-    out = run(email_mcp.email_autodiscover(
-        email_mcp.AutodiscoverInput(email_address="alice@example.com")
-    ))
+    _stub_autodiscover(
+        monkeypatch,
+        {
+            "sources": ["mozilla"],
+            "imap_host": "imap.example.com",
+            "imap_port": 993,
+            "imap_security": "ssl",
+        },
+    )
+    out = run(
+        email_mcp.email_autodiscover(
+            email_mcp.AutodiscoverInput(email_address="alice@example.com")
+        )
+    )
     assert "**Provider**" not in out
     assert "## IMAP (Incoming)" in out
 
@@ -281,43 +306,62 @@ def test_autodiscover_tool_omits_provider_when_absent(monkeypatch):
 def test_autodiscover_tool_default_ports_and_security_when_not_provided(monkeypatch):
     """When the orchestrator omits port/security, the formatter falls back
     to the IMAP=993/ssl and SMTP=587/starttls defaults."""
-    _stub_autodiscover(monkeypatch, {
-        "sources": ["mozilla"],
-        "imap_host": "imap.example.com",
-        "smtp_host": "smtp.example.com",
-    })
-    out = run(email_mcp.email_autodiscover(
-        email_mcp.AutodiscoverInput(email_address="alice@example.com")
-    ))
+    _stub_autodiscover(
+        monkeypatch,
+        {
+            "sources": ["mozilla"],
+            "imap_host": "imap.example.com",
+            "smtp_host": "smtp.example.com",
+        },
+    )
+    out = run(
+        email_mcp.email_autodiscover(
+            email_mcp.AutodiscoverInput(email_address="alice@example.com")
+        )
+    )
     assert "993" in out
     assert "ssl" in out
     assert "587" in out
     assert "starttls" in out
 
 
-def test_autodiscover_tool_uses_default_username_when_no_template_suggested(monkeypatch):
-    _stub_autodiscover(monkeypatch, {
-        "sources": ["mozilla"],
-        "imap_host": "imap.example.com",
-        "imap_port": 993,
-        "imap_security": "ssl",
-    })
-    out = run(email_mcp.email_autodiscover(
-        email_mcp.AutodiscoverInput(email_address="bob@example.org")
-    ))
+def test_autodiscover_tool_uses_default_username_when_no_template_suggested(
+    monkeypatch,
+):
+    _stub_autodiscover(
+        monkeypatch,
+        {
+            "sources": ["mozilla"],
+            "imap_host": "imap.example.com",
+            "imap_port": 993,
+            "imap_security": "ssl",
+        },
+    )
+    out = run(
+        email_mcp.email_autodiscover(
+            email_mcp.AutodiscoverInput(email_address="bob@example.org")
+        )
+    )
     assert "**Suggested username**: `bob@example.org` (default)" in out
 
 
-def test_autodiscover_tool_omits_dav_and_smtp_blocks_when_only_imap_discovered(monkeypatch):
-    _stub_autodiscover(monkeypatch, {
-        "sources": ["mozilla"],
-        "imap_host": "imap.example.com",
-        "imap_port": 993,
-        "imap_security": "ssl",
-    })
-    out = run(email_mcp.email_autodiscover(
-        email_mcp.AutodiscoverInput(email_address="alice@example.com")
-    ))
+def test_autodiscover_tool_omits_dav_and_smtp_blocks_when_only_imap_discovered(
+    monkeypatch,
+):
+    _stub_autodiscover(
+        monkeypatch,
+        {
+            "sources": ["mozilla"],
+            "imap_host": "imap.example.com",
+            "imap_port": 993,
+            "imap_security": "ssl",
+        },
+    )
+    out = run(
+        email_mcp.email_autodiscover(
+            email_mcp.AutodiscoverInput(email_address="alice@example.com")
+        )
+    )
     assert "## IMAP (Incoming)" in out
     assert "## SMTP" not in out
     assert "## CalDAV" not in out
@@ -334,15 +378,20 @@ def test_autodiscover_tool_omits_imap_block_when_only_smtp_discovered(monkeypatc
     """A discovery result with smtp_host but no imap_host → the
     ``if result.get("imap_host"):`` arm is False, the IMAP block is skipped
     while the SMTP block still renders. Pins partial 1306->1313."""
-    _stub_autodiscover(monkeypatch, {
-        "sources": ["dns-srv"],
-        "smtp_host": "smtp.example.com",
-        "smtp_port": 587,
-        "smtp_security": "starttls",
-    })
-    out = run(email_mcp.email_autodiscover(
-        email_mcp.AutodiscoverInput(email_address="alice@example.com")
-    ))
+    _stub_autodiscover(
+        monkeypatch,
+        {
+            "sources": ["dns-srv"],
+            "smtp_host": "smtp.example.com",
+            "smtp_port": 587,
+            "smtp_security": "starttls",
+        },
+    )
+    out = run(
+        email_mcp.email_autodiscover(
+            email_mcp.AutodiscoverInput(email_address="alice@example.com")
+        )
+    )
     assert "## IMAP" not in out
     assert "## SMTP (Outgoing)" in out
     # Anchored: the host shows up in the production-formatted host line,

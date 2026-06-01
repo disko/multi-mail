@@ -8,6 +8,7 @@ Covers:
   credentials and must not be world-readable.
 - ``_get_account`` lookup and not-found path.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -39,6 +40,7 @@ def config(tmp_path, monkeypatch):
 # _load_accounts
 # ---------------------------------------------------------------------------
 
+
 def test_load_returns_empty_list_when_file_missing(config):
     assert not config.exists()
     assert email_mcp._load_accounts() == []
@@ -46,7 +48,9 @@ def test_load_returns_empty_list_when_file_missing(config):
 
 def test_load_returns_accounts_from_valid_json(config):
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(json.dumps({"accounts": [{"id": "a", "email_address": "a@example.com"}]}))
+    config.write_text(
+        json.dumps({"accounts": [{"id": "a", "email_address": "a@example.com"}]})
+    )
     accounts = email_mcp._load_accounts()
     assert accounts == [{"id": "a", "email_address": "a@example.com"}]
 
@@ -61,6 +65,7 @@ def test_load_returns_empty_list_when_no_accounts_key(config):
 # ---------------------------------------------------------------------------
 # _save_accounts
 # ---------------------------------------------------------------------------
+
 
 def test_save_creates_parent_directory(config):
     assert not config.parent.exists()
@@ -109,11 +114,14 @@ def test_save_parent_dir_is_owner_only(config):
 # _get_account
 # ---------------------------------------------------------------------------
 
+
 def test_get_account_returns_matching_entry(config):
-    email_mcp._save_accounts([
-        {"id": "a", "email_address": "a@example.com"},
-        {"id": "b", "email_address": "b@example.com"},
-    ])
+    email_mcp._save_accounts(
+        [
+            {"id": "a", "email_address": "a@example.com"},
+            {"id": "b", "email_address": "b@example.com"},
+        ]
+    )
     assert email_mcp._get_account("b")["email_address"] == "b@example.com"
 
 
@@ -222,6 +230,7 @@ def test_save_accounts_skips_chmod_when_os_name_is_not_posix(config, monkeypatch
     module load with the real os.name (``"posix"``) so Path() still works.
     """
     import os as _real_os
+
     chmod_calls = []
 
     class _OsShim:
@@ -236,6 +245,7 @@ def test_save_accounts_skips_chmod_when_os_name_is_not_posix(config, monkeypatch
     def _track_chmod(path, mode):
         chmod_calls.append((str(path), mode))
         return _real_os.chmod(path, mode)
+
     shim.chmod = _track_chmod  # type: ignore[attr-defined]
 
     monkeypatch.setattr(email_mcp, "os", shim)
