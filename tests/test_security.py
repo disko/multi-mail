@@ -1,4 +1,5 @@
 """Unit tests for servers/_security.py."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,21 +8,24 @@ import _security as sec
 
 
 class TestIsSafeHost:
-    @pytest.mark.parametrize("host,expected_ok", [
-        ("127.0.0.1", False),
-        ("localhost", False),
-        ("169.254.169.254", False),
-        ("metadata.google.internal", False),
-        ("10.0.0.1", False),
-        ("172.16.0.1", False),
-        ("192.168.1.1", False),
-        ("0.0.0.0", False),
-        ("::1", False),
-        ("fe80::1", False),
-        ("fd00:ec2::254", False),
-        ("8.8.8.8", True),
-        ("1.1.1.1", True),
-    ])
+    @pytest.mark.parametrize(
+        "host,expected_ok",
+        [
+            ("127.0.0.1", False),
+            ("localhost", False),
+            ("169.254.169.254", False),
+            ("metadata.google.internal", False),
+            ("10.0.0.1", False),
+            ("172.16.0.1", False),
+            ("192.168.1.1", False),
+            ("0.0.0.0", False),
+            ("::1", False),
+            ("fe80::1", False),
+            ("fd00:ec2::254", False),
+            ("8.8.8.8", True),
+            ("1.1.1.1", True),
+        ],
+    )
     def test_literal_addresses(self, host, expected_ok):
         ok, reason = sec._is_safe_host(host)
         assert ok is expected_ok, f"{host}: {reason}"

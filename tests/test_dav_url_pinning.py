@@ -5,6 +5,7 @@ Prevents a compromised (or MITM'd) DAV server from returning attacker-controlled
 to a different host. The SSRF guard does not catch this because the attacker
 host is a normal public IP.
 """
+
 from __future__ import annotations
 
 import importlib.util

@@ -2,9 +2,9 @@
   "manifest_version": "0.2",
   "name": "multi-mail",
   "display_name": "Multi mail",
-  "version": "0.3.15",
+  "version": "0.4.0",
   "description": "Connect to multiple self-hosted mail servers — IMAP, SMTP, Sieve filters, CalDAV calendars, and CardDAV contacts",
-  "long_description": "Multi-mail exposes 34 MCP tools for IMAP/SMTP email, ManageSieve filters, CalDAV calendars, and CardDAV contacts. Supports multiple accounts, autodiscovery, SSRF-guarded DAV requests, and TLS-verified network access. Account configuration is stored in ~/.claude/multi-mail-accounts.json.",
+  "long_description": "Multi-mail exposes 38 MCP tools for IMAP/SMTP email, ManageSieve filters, CalDAV calendars, and CardDAV contacts. Supports multiple accounts, autodiscovery, SSRF-guarded DAV requests, and TLS-verified network access. Account configuration is stored in ~/.claude/multi-mail-accounts.json.",
   "author": {
     "name": "disko",
     "url": "https://github.com/disko"
@@ -38,6 +38,8 @@
     { "name": "email_list_messages", "description": "List messages (paginated)" },
     { "name": "email_search_messages", "description": "Search with IMAP SEARCH syntax" },
     { "name": "email_read_message", "description": "Read full message content" },
+    { "name": "email_list_attachments", "description": "List a message's attachments (index, filename, type, size) without marking it read" },
+    { "name": "email_get_attachment", "description": "Download one attachment (by index or filename) to a validated absolute path" },
     { "name": "email_send_message", "description": "Send a new email" },
     { "name": "email_reply", "description": "Reply or reply-all" },
     { "name": "email_forward", "description": "Forward a message" },

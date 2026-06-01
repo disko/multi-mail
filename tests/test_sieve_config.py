@@ -4,12 +4,11 @@ Regression coverage for the bug where ``sieve_host: null`` in the saved
 account JSON made the plugin dial localhost instead of the IMAP host
 (``socket.create_connection((None, 4190))`` → ``[Errno 61] Connection refused``).
 """
+
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-
-import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent

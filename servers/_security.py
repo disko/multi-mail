@@ -18,12 +18,14 @@ from urllib.parse import urlparse
 
 import httpx
 
-_METADATA_HOSTS = frozenset({
-    "169.254.169.254",
-    "metadata.google.internal",
-    "metadata.aws.com",
-    "fd00:ec2::254",
-})
+_METADATA_HOSTS = frozenset(
+    {
+        "169.254.169.254",
+        "metadata.google.internal",
+        "metadata.aws.com",
+        "fd00:ec2::254",
+    }
+)
 
 _ALLOW_PRIVATE = os.environ.get("MULTI_MAIL_ALLOW_PRIVATE_AUTODISCOVER") == "1"
 
@@ -108,7 +110,11 @@ def resolve_dav_url(account_base: str, target: str) -> str:
 
     from urllib.parse import urljoin
 
-    full = target if target.startswith(("http://", "https://")) else urljoin(account_base, target)
+    full = (
+        target
+        if target.startswith(("http://", "https://"))
+        else urljoin(account_base, target)
+    )
     final_host = urlparse(full).hostname
     if not final_host or final_host.lower() != base_host.lower():
         raise httpx.RequestError(

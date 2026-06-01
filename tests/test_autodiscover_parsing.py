@@ -1,4 +1,5 @@
 """Tests for Mozilla autoconfig + Microsoft autodiscover XML parsing."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -39,6 +40,7 @@ def test_parse_microsoft_autodiscover_extracts_imap_and_smtp():
 def test_billion_laughs_rejected_by_defusedxml():
     """defusedxml.ElementTree.fromstring must refuse the entity-bomb DTD."""
     from defusedxml import EntitiesForbidden
+
     xml = (FIXTURES / "billion_laughs.xml").read_text()
     with pytest.raises(EntitiesForbidden):
         email_mcp._parse_mozilla_autoconfig(xml)
@@ -61,17 +63,17 @@ def test_parse_mozilla_skips_non_imap_incoming_servers():
         '<clientConfig version="1.1">'
         '<emailProvider id="example.com">'
         '<incomingServer type="pop3">'
-        '<hostname>pop.example.com</hostname>'
-        '<port>995</port>'
-        '<socketType>SSL</socketType>'
-        '</incomingServer>'
+        "<hostname>pop.example.com</hostname>"
+        "<port>995</port>"
+        "<socketType>SSL</socketType>"
+        "</incomingServer>"
         '<outgoingServer type="smtp">'
-        '<hostname>smtp.example.com</hostname>'
-        '<port>587</port>'
-        '<socketType>STARTTLS</socketType>'
-        '</outgoingServer>'
-        '</emailProvider>'
-        '</clientConfig>'
+        "<hostname>smtp.example.com</hostname>"
+        "<port>587</port>"
+        "<socketType>STARTTLS</socketType>"
+        "</outgoingServer>"
+        "</emailProvider>"
+        "</clientConfig>"
     )
     result = email_mcp._parse_mozilla_autoconfig(xml)
     assert result is not None
@@ -86,15 +88,15 @@ def test_parse_mozilla_skips_non_smtp_outgoing_servers():
         '<clientConfig version="1.1">'
         '<emailProvider id="example.com">'
         '<incomingServer type="imap">'
-        '<hostname>imap.example.com</hostname>'
-        '<port>993</port>'
-        '<socketType>SSL</socketType>'
-        '</incomingServer>'
+        "<hostname>imap.example.com</hostname>"
+        "<port>993</port>"
+        "<socketType>SSL</socketType>"
+        "</incomingServer>"
         '<outgoingServer type="pop3">'
-        '<hostname>weird.example.com</hostname>'
-        '</outgoingServer>'
-        '</emailProvider>'
-        '</clientConfig>'
+        "<hostname>weird.example.com</hostname>"
+        "</outgoingServer>"
+        "</emailProvider>"
+        "</clientConfig>"
     )
     result = email_mcp._parse_mozilla_autoconfig(xml)
     assert result is not None
@@ -108,9 +110,9 @@ def test_parse_mozilla_returns_none_when_no_hosts_found():
         '<?xml version="1.0"?>'
         '<clientConfig version="1.1">'
         '<emailProvider id="example.com">'
-        '<displayName>Example</displayName>'
-        '</emailProvider>'
-        '</clientConfig>'
+        "<displayName>Example</displayName>"
+        "</emailProvider>"
+        "</clientConfig>"
     )
     assert email_mcp._parse_mozilla_autoconfig(xml) is None
 
@@ -124,16 +126,16 @@ def test_parse_microsoft_encryption_ssl_maps_to_ssl():
     """An <Encryption>SSL</Encryption> tag maps to ``"ssl"`` (line 1090)."""
     xml = (
         '<?xml version="1.0"?>'
-        '<Autodiscover>'
-        '<Response><Account>'
-        '<Protocol>'
-        '<Type>IMAP</Type>'
-        '<Server>imap.example.com</Server>'
-        '<Port>993</Port>'
-        '<Encryption>SSL</Encryption>'
-        '</Protocol>'
-        '</Account></Response>'
-        '</Autodiscover>'
+        "<Autodiscover>"
+        "<Response><Account>"
+        "<Protocol>"
+        "<Type>IMAP</Type>"
+        "<Server>imap.example.com</Server>"
+        "<Port>993</Port>"
+        "<Encryption>SSL</Encryption>"
+        "</Protocol>"
+        "</Account></Response>"
+        "</Autodiscover>"
     )
     result = email_mcp._parse_microsoft_autodiscover(xml)
     assert result is not None
@@ -144,15 +146,15 @@ def test_parse_microsoft_no_encryption_defaults_to_starttls():
     """No <SSL> and no <Encryption> → fall-through default 'starttls' (line 1096)."""
     xml = (
         '<?xml version="1.0"?>'
-        '<Autodiscover>'
-        '<Response><Account>'
-        '<Protocol>'
-        '<Type>SMTP</Type>'
-        '<Server>smtp.example.com</Server>'
-        '<Port>587</Port>'
-        '</Protocol>'
-        '</Account></Response>'
-        '</Autodiscover>'
+        "<Autodiscover>"
+        "<Response><Account>"
+        "<Protocol>"
+        "<Type>SMTP</Type>"
+        "<Server>smtp.example.com</Server>"
+        "<Port>587</Port>"
+        "</Protocol>"
+        "</Account></Response>"
+        "</Autodiscover>"
     )
     result = email_mcp._parse_microsoft_autodiscover(xml)
     assert result is not None
@@ -163,20 +165,20 @@ def test_parse_microsoft_omits_port_when_missing():
     """No <Port> → port key is not set (partials 1100->1102, 1105->1107)."""
     xml = (
         '<?xml version="1.0"?>'
-        '<Autodiscover>'
-        '<Response><Account>'
-        '<Protocol>'
-        '<Type>IMAP</Type>'
-        '<Server>imap.example.com</Server>'
-        '<Encryption>SSL</Encryption>'
-        '</Protocol>'
-        '<Protocol>'
-        '<Type>SMTP</Type>'
-        '<Server>smtp.example.com</Server>'
-        '<Encryption>STARTTLS</Encryption>'
-        '</Protocol>'
-        '</Account></Response>'
-        '</Autodiscover>'
+        "<Autodiscover>"
+        "<Response><Account>"
+        "<Protocol>"
+        "<Type>IMAP</Type>"
+        "<Server>imap.example.com</Server>"
+        "<Encryption>SSL</Encryption>"
+        "</Protocol>"
+        "<Protocol>"
+        "<Type>SMTP</Type>"
+        "<Server>smtp.example.com</Server>"
+        "<Encryption>STARTTLS</Encryption>"
+        "</Protocol>"
+        "</Account></Response>"
+        "</Autodiscover>"
     )
     result = email_mcp._parse_microsoft_autodiscover(xml)
     assert result is not None
@@ -190,10 +192,10 @@ def test_parse_microsoft_returns_none_when_no_protocols():
     """An Autodiscover envelope with no <Protocol> elements → None (line 1110)."""
     xml = (
         '<?xml version="1.0"?>'
-        '<Autodiscover>'
-        '<Response><Account>'
-        '</Account></Response>'
-        '</Autodiscover>'
+        "<Autodiscover>"
+        "<Response><Account>"
+        "</Account></Response>"
+        "</Autodiscover>"
     )
     assert email_mcp._parse_microsoft_autodiscover(xml) is None
 
@@ -221,14 +223,14 @@ def test_parse_mozilla_skips_elements_with_empty_text():
         '<clientConfig version="1.1">'
         '<emailProvider id="example.com">'
         '<incomingServer type="imap">'
-        '<hostname></hostname><port></port>'
-        '<socketType></socketType><username></username>'
-        '</incomingServer>'
+        "<hostname></hostname><port></port>"
+        "<socketType></socketType><username></username>"
+        "</incomingServer>"
         '<outgoingServer type="smtp">'
-        '<hostname></hostname><port></port><socketType></socketType>'
-        '</outgoingServer>'
-        '</emailProvider>'
-        '</clientConfig>'
+        "<hostname></hostname><port></port><socketType></socketType>"
+        "</outgoingServer>"
+        "</emailProvider>"
+        "</clientConfig>"
     )
     # Neither imap_host nor smtp_host was populated → return None.
     assert email_mcp._parse_mozilla_autoconfig(xml) is None
@@ -242,11 +244,11 @@ def test_parse_mozilla_skips_provider_block_when_absent():
         '<?xml version="1.0"?>'
         '<clientConfig version="1.1">'
         '<incomingServer type="imap">'
-        '<hostname>imap.example.com</hostname>'
-        '<port>993</port>'
-        '<socketType>SSL</socketType>'
-        '</incomingServer>'
-        '</clientConfig>'
+        "<hostname>imap.example.com</hostname>"
+        "<port>993</port>"
+        "<socketType>SSL</socketType>"
+        "</incomingServer>"
+        "</clientConfig>"
     )
     result = email_mcp._parse_mozilla_autoconfig(xml)
     assert result is not None
@@ -265,21 +267,21 @@ def test_parse_microsoft_smtp_protocol_without_server_skips_assignment():
     <Protocol>. Pins partial 1103->1081."""
     xml = (
         '<?xml version="1.0"?>'
-        '<Autodiscover>'
-        '<Response><Account>'
-        '<Protocol>'
-        '<Type>SMTP</Type>'
-        '<Port>587</Port>'
-        '<Encryption>STARTTLS</Encryption>'
-        '</Protocol>'
-        '<Protocol>'
-        '<Type>IMAP</Type>'
-        '<Server>imap.example.com</Server>'
-        '<Port>993</Port>'
-        '<Encryption>SSL</Encryption>'
-        '</Protocol>'
-        '</Account></Response>'
-        '</Autodiscover>'
+        "<Autodiscover>"
+        "<Response><Account>"
+        "<Protocol>"
+        "<Type>SMTP</Type>"
+        "<Port>587</Port>"
+        "<Encryption>STARTTLS</Encryption>"
+        "</Protocol>"
+        "<Protocol>"
+        "<Type>IMAP</Type>"
+        "<Server>imap.example.com</Server>"
+        "<Port>993</Port>"
+        "<Encryption>SSL</Encryption>"
+        "</Protocol>"
+        "</Account></Response>"
+        "</Autodiscover>"
     )
     result = email_mcp._parse_microsoft_autodiscover(xml)
     assert result is not None

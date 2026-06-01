@@ -4,6 +4,7 @@ vCard summary formatters that feed the calendar and contact MCP tools.
 We construct minimal real iCalendar / vCard payloads (vobject can parse them)
 and wrap them in a tiny ``_FakeEvent`` for the CalDAV side.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -23,6 +24,7 @@ _format_contact = email_mcp._format_contact
 
 class _FakeEvent:
     """Stand-in for caldav.Event — only .data is read by _format_event."""
+
     def __init__(self, data):
         self.data = data
 
