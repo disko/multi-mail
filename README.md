@@ -229,12 +229,12 @@ open htmlcov/index.html
 | Module | Coverage | Status |
 |--------|----------|--------|
 | `servers/_security.py` | **100%** | SSRF guard, redirect hook, DAV host pinning |
-| `servers/email_mcp.py` | **100%** | Every tool flow, helper, validator, and error branch — 412 tests across 15 files |
+| `servers/email_mcp.py` | **100%** | Every tool flow, helper, validator, and error branch — 440 tests across 16 files |
 
 Coverage was driven phase by phase (see roadmap below) starting with the modules with the highest blast radius (security, autodiscovery, server interaction) and finishing with a seven-iteration sweep that closed the last 25 percentage points. The coverage work surfaced **three real bugs** and **one security fix** along the way (Sieve null fallback, calendar UID formatter, header decoder, accounts.json permissions).
 
 <details>
-<summary>Coverage roadmap (all 17 steps ✅ done — 24% → 100%)</summary>
+<summary>Coverage roadmap (all 18 steps ✅ done — 24% → 100%)</summary>
 
 1. ✅ Account management (`tests/test_account_io.py`)
 2. ✅ Message formatting (`tests/test_message_building.py`)
@@ -253,6 +253,7 @@ Coverage was driven phase by phase (see roadmap below) starting with the modules
 15. ✅ IMAP outer-except tails + body-branch sweep + Sieve logout-swallow + CardDAV body-branches
 16. ✅ Defensive validators/helpers + autodiscover XML parser branches + `_security.py` mop-up to 100%
 17. ✅ Final cleanup — last 11 statements + 29 partial branches; one annotated `# pragma: no cover` for a provably unreachable defensive branch
+18. ✅ Attachment tools — `email_list_attachments` (PEEK fetch, inline-with-filename detection, nameless-part placeholder) + `email_get_attachment` (index/filename selector, `save_path` validation, logout-swallow, non-decodable payload) (`tests/test_email_mcp_attachments.py`)
 </details>
 
 ### Build the Desktop bundle locally
@@ -271,7 +272,7 @@ For deeper contributor notes, see [CLAUDE.md](CLAUDE.md).
 
 | Component | Description |
 |-----------|-------------|
-| **MCP Server** (`servers/email_mcp.py`) | Python/FastMCP server exposing 34 tools |
+| **MCP Server** (`servers/email_mcp.py`) | Python/FastMCP server exposing 38 tools |
 | **Security helpers** (`servers/_security.py`) | SSRF guard, TLS redirect hook, DAV host pinning |
 | **Workflow skill** (`skills/email-workflows/`) | Workflow guidance, IMAP search syntax cheatsheet, Sieve language reference |
 | **Slash commands** | `/email-add-account`, `/email-remove-account`, `/email-list-accounts` |
@@ -279,6 +280,12 @@ For deeper contributor notes, see [CLAUDE.md](CLAUDE.md).
 ---
 
 ## Changelog
+
+### 0.4.0 — attachment tools
+
+- **Added:** `email_list_attachments` — lists a message's attachments (index, filename, content-type, size) as a Markdown table. Fetches with `BODY.PEEK[]` so the message stays unread, and counts both `Content-Disposition: attachment` parts and inline parts that carry a filename (the Outlook PDF case).
+- **Added:** `email_get_attachment` — downloads one attachment to disk, selected by 0-based `index` or by `filename` (exactly one, enforced by a model validator). `save_path` must be absolute and is rejected for system directories (`/etc`, `/usr`, `/bin`, `/sbin`, `/System`, `/Library/System`), including `..`-normalized traversal. The response carries metadata only — never the binary payload.
+- **Internal:** First-ever `ruff format` + `ruff check` sweep of the whole repo (server + tests). Coverage held at **100%** (440 tests across 16 files).
 
 ### 0.3.13 — 100% test coverage milestone
 

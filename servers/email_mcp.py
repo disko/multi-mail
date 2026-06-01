@@ -600,6 +600,86 @@ class ReadEmailInput(AccountIdMixin):
     )
 
 
+class ListAttachmentsInput(AccountIdMixin):
+    """Input for listing attachments on a message."""
+
+    uid: str = Field(
+        ..., description="Message UID (from list or search results)", min_length=1
+    )
+    folder: str = Field(
+        default="INBOX", description="IMAP folder containing the message"
+    )
+
+
+class GetAttachmentInput(AccountIdMixin):
+    """Input for fetching a single attachment and writing it to disk.
+
+    Either ``index`` (0-based, from ``email_list_attachments``) OR
+    ``filename`` must be provided — exactly one. ``save_path`` is required
+    and must be an absolute path outside system directories; the file is
+    written there with parent dirs created as needed.
+    """
+
+    uid: str = Field(
+        ..., description="Message UID (from list or search results)", min_length=1
+    )
+    folder: str = Field(
+        default="INBOX", description="IMAP folder containing the message"
+    )
+    index: Optional[int] = Field(
+        default=None,
+        description="0-based attachment index (from email_list_attachments)",
+        ge=0,
+    )
+    filename: Optional[str] = Field(
+        default=None,
+        description="Attachment filename to match (decoded). Mutually exclusive with index.",
+        min_length=1,
+    )
+    save_path: str = Field(
+        ...,
+        description=(
+            "Absolute path where to write the attachment bytes. "
+            "Must be absolute; paths under /etc, /usr, /bin, /sbin, /System, "
+            "/Library/System are rejected. Parent dirs are created."
+        ),
+        min_length=1,
+    )
+
+    @model_validator(mode="after")
+    def _require_exactly_one_selector(self) -> "GetAttachmentInput":
+        has_index = self.index is not None
+        has_filename = self.filename is not None
+        if has_index == has_filename:
+            raise ValueError("exactly one of index or filename must be provided")
+        return self
+
+    @field_validator("save_path")
+    @classmethod
+    def _validate_save_path(cls, v: str) -> str:
+        # Reject relative paths.
+        p = Path(v)
+        if not p.is_absolute():
+            raise ValueError(f"save_path must be absolute, got: {v!r}")
+        # Reject paths under sensitive system dirs. Use as_posix for prefix
+        # checks so this works the same on macOS and Linux.
+        forbidden_prefixes = (
+            "/etc",
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/System",
+            "/Library/System",
+        )
+        resolved = os.path.normpath(str(p))
+        for prefix in forbidden_prefixes:
+            if resolved == prefix or resolved.startswith(prefix + "/"):
+                raise ValueError(
+                    f"save_path under system directory {prefix!r} is forbidden"
+                )
+        return v
+
+
 class SendEmailInput(AccountIdMixin):
     """Input for composing and sending a new email."""
 
@@ -1977,6 +2057,192 @@ async def email_read_message(params: ReadEmailInput) -> str:
                 lines.append("")
                 lines.append(body[:50000])  # cap very large bodies
 
+                return "\n".join(lines)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+
+    return await asyncio.to_thread(_impl)
+
+
+# ---------------------------------------------------------------------------
+# Attachment helpers + tools
+# ---------------------------------------------------------------------------
+
+
+def _iter_attachment_parts(msg: email.message.Message):
+    """Yield parts that should be treated as attachments.
+
+    Covers both formal ``Content-Disposition: attachment`` parts and inline
+    parts that nevertheless carry a filename (Outlook commonly emits PDFs
+    this way — see the Schotten case).
+    """
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        disposition = (part.get_content_disposition() or "").lower()
+        filename = part.get_filename()
+        if disposition == "attachment" or filename:
+            yield part
+
+
+def _attachment_filename(part: email.message.Message, fallback_index: int) -> str:
+    """Return a decoded filename for *part*, or a generic placeholder."""
+    raw = part.get_filename()
+    if not raw:
+        return f"attachment-{fallback_index}"
+    return _decode_header(raw)
+
+
+@mcp.tool(
+    name="email_list_attachments",
+    annotations={
+        "title": "List Email Attachments",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def email_list_attachments(params: ListAttachmentsInput) -> str:
+    """List attachments on a message without modifying it.
+
+    Uses ``BODY.PEEK[]`` so the message stays unread. Returns a Markdown
+    table with a 0-based index suitable for passing to
+    ``email_get_attachment``.
+
+    Args:
+        params: account_id, uid, folder.
+
+    Returns:
+        Markdown table of attachments (Index | Filename | Content-Type | Size).
+    """
+
+    def _impl():
+        try:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
+            try:
+                conn.select(params.folder, readonly=True)
+                status, data = conn.uid("FETCH", params.uid, "(BODY.PEEK[])")
+                if status != "OK" or not data or not data[0]:
+                    return f"Error: Could not fetch message UID {params.uid}."
+                raw = data[0][1] if isinstance(data[0], tuple) else data[0]
+                msg = email.message_from_bytes(raw)
+
+                rows = []
+                for idx, part in enumerate(_iter_attachment_parts(msg)):
+                    filename = _attachment_filename(part, idx)
+                    ctype = part.get_content_type() or "application/octet-stream"
+                    payload = part.get_payload(decode=True) or b""
+                    rows.append((idx, filename, ctype, len(payload)))
+
+                lines = [f"# Attachments for UID {params.uid} in {params.folder}", ""]
+                if not rows:
+                    lines.append("_No attachments found._")
+                    return "\n".join(lines)
+
+                lines.append("| Index | Filename | Content-Type | Size (bytes) |")
+                lines.append("|------:|----------|--------------|-------------:|")
+                for idx, filename, ctype, size in rows:
+                    # Escape pipe characters in filenames so the table stays valid.
+                    safe_name = filename.replace("|", "\\|")
+                    lines.append(f"| {idx} | {safe_name} | {ctype} | {size} |")
+                return "\n".join(lines)
+            finally:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+        except Exception as e:
+            return f"Error: {e}"
+
+    return await asyncio.to_thread(_impl)
+
+
+@mcp.tool(
+    name="email_get_attachment",
+    annotations={
+        "title": "Download Email Attachment",
+        "readOnlyHint": False,  # writes to disk
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def email_get_attachment(params: GetAttachmentInput) -> str:
+    """Fetch one attachment and save the bytes to ``save_path``.
+
+    Locates the attachment by 0-based ``index`` (from
+    ``email_list_attachments``) or by ``filename`` (matched against the
+    decoded filename). Writes raw bytes — the response only contains
+    metadata, never the binary payload.
+
+    Args:
+        params: account_id, uid, folder, index or filename, save_path.
+
+    Returns:
+        Markdown summary with the saved path, filename, content-type, size.
+    """
+
+    def _impl():
+        try:
+            acct = _get_account(params.account_id)
+            conn = _imap_connect(acct)
+            try:
+                conn.select(params.folder, readonly=True)
+                status, data = conn.uid("FETCH", params.uid, "(BODY.PEEK[])")
+                if status != "OK" or not data or not data[0]:
+                    return f"Error: Could not fetch message UID {params.uid}."
+                raw = data[0][1] if isinstance(data[0], tuple) else data[0]
+                msg = email.message_from_bytes(raw)
+
+                target_part = None
+                target_filename = None
+                for idx, part in enumerate(_iter_attachment_parts(msg)):
+                    filename = _attachment_filename(part, idx)
+                    # Exactly one of index/filename is set (enforced by the
+                    # model validator), so a flat match keeps both branches
+                    # reachable — no dead `elif`.
+                    if params.index is not None:
+                        is_match = idx == params.index
+                    else:
+                        is_match = filename == params.filename
+                    if is_match:
+                        target_part = part
+                        target_filename = filename
+                        break
+
+                if target_part is None:
+                    selector = (
+                        f"index={params.index}"
+                        if params.index is not None
+                        else f"filename={params.filename!r}"
+                    )
+                    return (
+                        f"Error: No attachment matching {selector} on UID {params.uid}."
+                    )
+
+                payload = target_part.get_payload(decode=True)
+                if payload is None:
+                    return f"Error: Attachment {target_filename!r} has no decodable payload."
+
+                save_path = Path(params.save_path)
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                save_path.write_bytes(payload)
+
+                ctype = target_part.get_content_type() or "application/octet-stream"
+                lines = [
+                    f"# Saved attachment from UID {params.uid}",
+                    f"**Filename**: {target_filename}",
+                    f"**Content-Type**: {ctype}",
+                    f"**Size (bytes)**: {len(payload)}",
+                    f"**Saved to**: {save_path}",
+                ]
                 return "\n".join(lines)
             finally:
                 try:
